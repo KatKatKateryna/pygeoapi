@@ -39,6 +39,7 @@ from pygeoapi.provider.base import BaseProvider, ProviderItemNotFoundError
 from pygeoapi.util import crs_transform
 
 LOGGER = logging.getLogger(__name__)
+_user_data_env_var = "SPECKLE_USERDATA_PATH"
 
 
 class SpeckleProvider(BaseProvider):
@@ -84,6 +85,8 @@ class SpeckleProvider(BaseProvider):
                     "-m",
                     "pip",
                     "install",
+                    "specklepy",
+                    "-t",
                     "specklepy",
                 ],
                 capture_output=True,
@@ -535,3 +538,44 @@ class SpeckleProvider(BaseProvider):
         else:
             pythonExec += "/bin/python3"
         return pythonExec
+
+    def user_application_data_path(self) -> "Path":
+        """Get the platform specific user configuration folder path"""
+        from pathlib import Path
+
+        path_override = self._path()
+        if path_override:
+            return path_override
+
+        try:
+            if sys.platform.startswith("win"):
+                app_data_path = os.getenv("APPDATA")
+                if not app_data_path:
+                    raise Exception("Cannot get appdata path from environment.")
+                return Path(app_data_path)
+            else:
+                # try getting the standard XDG_DATA_HOME value
+                # as that is used as an override
+                app_data_path = os.getenv("XDG_DATA_HOME")
+                if app_data_path:
+                    return Path(app_data_path)
+                else:
+                    return self.ensure_folder_exists(Path.home(), ".config")
+        except Exception as ex:
+            raise Exception("Failed to initialize user application data path.", ex)
+
+    def ensure_folder_exists(self, base_path: "Path", folder_name: str) -> "Path":
+        from pathlib import Path
+
+        path = base_path.joinpath(folder_name)
+        path.mkdir(exist_ok=True, parents=True)
+        return path
+
+    def _path(self) -> Optional["Path"]:
+        from pathlib import Path
+
+        """Read the user data path override setting."""
+        path_override = os.environ.get(_user_data_env_var)
+        if path_override:
+            return Path(path_override)
+        return None
