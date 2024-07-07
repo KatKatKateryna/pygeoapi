@@ -58,7 +58,7 @@ PLUGINS = {
         "PostgreSQL": "pygeoapi.provider.postgresql.PostgreSQLProvider",
         "rasterio": "pygeoapi.provider.rasterio_.RasterioProvider",
         "SensorThings": "pygeoapi.provider.sensorthings.SensorThingsProvider",
-        "Speckle": "pygeoapi.provider.geojson.SpeckleProvider",
+        "Speckle": "pygeoapi.provider.speckle.SpeckleProvider",
         "SQLiteGPKG": "pygeoapi.provider.sqlite.SQLiteGPKGProvider",
         "Socrata": "pygeoapi.provider.socrata.SODAServiceProvider",
         "TinyDBCatalogue": "pygeoapi.provider.tinydb_.TinyDBCatalogueProvider",
