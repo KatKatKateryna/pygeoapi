@@ -77,9 +77,8 @@ class SpeckleProvider(BaseProvider):
             print("Installing Speckle dependencies")
 
             from subprocess import run
-            import logging
 
-            logging.info(self.get_python_path())
+            raise Exception(self.get_python_path())
             completed_process = run(
                 [
                     self.get_python_path(),
