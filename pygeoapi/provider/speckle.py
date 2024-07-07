@@ -78,6 +78,8 @@ class SpeckleProvider(BaseProvider):
 
             from subprocess import run
 
+            raise Exception(self.get_python_path())
+
             completed_process = run(
                 [
                     self.get_python_path(),
