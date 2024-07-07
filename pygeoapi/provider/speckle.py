@@ -469,7 +469,7 @@ class SpeckleProvider(BaseProvider):
         transport = ServerTransport(client=client, account=account, stream_id=streamId)
         return transport
 
-    def get_python_path():
+    def get_python_path(self):
         if sys.platform.startswith("linux"):
             return sys.executable
         pythonExec = os.path.dirname(sys.executable)
