@@ -80,7 +80,7 @@ class SpeckleProvider(BaseProvider):
 
             completed_process = run(
                 [
-                    "python",
+                    self.get_python_path(),
                     "-m",
                     "pip",
                     "install",
@@ -88,7 +88,6 @@ class SpeckleProvider(BaseProvider):
                 ],
                 capture_output=True,
             )
-            raise Exception(specklepy)
 
             if completed_process.returncode != 0:
                 m = f"Failed to install dependenices through pip, got {completed_process.returncode} as return code. Full log: {completed_process}"
@@ -475,7 +474,7 @@ class SpeckleProvider(BaseProvider):
             return sys.executable
         pythonExec = os.path.dirname(sys.executable)
         if sys.platform == "win32":
-            pythonExec += "\\python3"
+            pythonExec += "\\python3.exe"
         else:
             pythonExec += "/bin/python3"
         return pythonExec
