@@ -273,7 +273,7 @@ class SpeckleProvider(BaseProvider):
             dst.write(json.dumps(all_data))
 
     def __repr__(self):
-        return f"<GeoJSONProvider> {self.data}"
+        return f"<SpeckleProvider> {self.data}"
 
     def load_speckle_data(self: str):
 
