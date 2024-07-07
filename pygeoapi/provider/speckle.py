@@ -78,8 +78,6 @@ class SpeckleProvider(BaseProvider):
 
             from subprocess import run
 
-            raise Exception(self.get_python_path())
-
             completed_process = run(
                 [
                     self.get_python_path(),
@@ -476,7 +474,7 @@ class SpeckleProvider(BaseProvider):
             return sys.executable
         pythonExec = os.path.dirname(sys.executable)
         if sys.platform == "win32":
-            pythonExec += "\\python3.exe"
+            pythonExec += "\\python"
         else:
             pythonExec += "/bin/python3"
         return pythonExec
