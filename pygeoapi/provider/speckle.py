@@ -32,7 +32,7 @@ import json
 import logging
 import os
 import sys
-from typing import Any, Dict, List, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 import uuid
 
 from pygeoapi.provider.base import BaseProvider, ProviderItemNotFoundError
@@ -369,14 +369,14 @@ class SpeckleProvider(BaseProvider):
         sw: "StreamWrapper",
     ) -> Tuple[Union["SpeckleClient", None], Union["Stream", None]]:
 
-        from specklepy.core.api.credentials import get_local_accounts
+        # from specklepy.core.api.credentials import get_local_accounts
         from specklepy.core.api.client import SpeckleClient
         from specklepy.core.api.models import Stream
         from specklepy.logging.exceptions import SpeckleException
 
         # only streams with write access
         client = None
-        for acc in get_local_accounts():
+        for acc in self.get_local_accounts():
             # only check accounts on selected server
             if acc.serverInfo.url in sw.server_url:
                 client = SpeckleClient(
@@ -401,6 +401,63 @@ class SpeckleProvider(BaseProvider):
                 raise SpeckleException("Fetching Speckle Project failed")
         else:
             raise SpeckleException("SpeckleClient creation failed")
+
+    def get_local_accounts(self, base_path: Optional[str] = None) -> List["Account"]:
+        """Gets all the accounts present in this environment
+
+        Arguments:
+            base_path {str} -- custom base path if you are not using the system default
+
+        Returns:
+            List[Account] -- list of all local accounts or an empty list if
+            no accounts were found
+        """
+
+        from pathlib import Path
+        from specklepy.core.api.credentials import Account
+        from specklepy.core.api.models import ServerInfo
+        from specklepy.core.helpers import speckle_path_provider
+        from specklepy.logging.exceptions import SpeckleException
+        from specklepy.transports.sqlite import SQLiteTransport
+
+        accounts: List[Account] = []
+        try:
+            account_storage = SQLiteTransport(scope="Accounts", base_path=base_path)
+            res = account_storage.get_all_objects()
+            account_storage.close()
+            if res:
+                accounts.extend(Account.parse_raw(r[1]) for r in res)
+        except SpeckleException:
+            # cannot open SQLiteTransport, probably because of the lack
+            # of disk write permissions
+            pass
+
+        json_acct_files = []
+        json_path = str(speckle_path_provider.accounts_folder_path())
+        try:
+            os.makedirs(json_path, exist_ok=True)
+            json_acct_files.extend(
+                file for file in os.listdir(json_path) if file.endswith(".json")
+            )
+
+        except Exception:
+            # cannot find or get the json account paths
+            pass
+
+        if json_acct_files:
+            try:
+                accounts.extend(
+                    Account.model_validate_json(Path(json_path, json_file).read_text())
+                    # Account.parse_file(os.path.join(json_path, json_file))
+                    for json_file in json_acct_files
+                )
+            except Exception as ex:
+                raise SpeckleException(
+                    "Invalid json accounts could not be read. Please fix or remove them.",
+                    ex,
+                ) from ex
+
+        return accounts
 
     def validateStream(stream: "Stream", dockwidget) -> Union["Stream", None]:
 
