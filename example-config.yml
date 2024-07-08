@@ -195,7 +195,7 @@ resources:
             - type: text/html
               rel: canonical
               title: information
-              href: https://app.speckle.systems/projects/99c4d1b1ba/models/aa5adec65a
+              href: https://app.speckle.systems/projects/17b0b76d13/models/4a0dea9d65@9a01ad4fb3
               hreflang: en-US
         extents:
             spatial:
@@ -207,7 +207,7 @@ resources:
         providers:
             - type: feature
               name: Speckle
-              data: https://app.speckle.systems/projects/99c4d1b1ba/models/aa5adec65a
+              data: https://app.speckle.systems/projects/17b0b76d13/models/4a0dea9d65@9a01ad4fb3
               id_field: id
               title_field: name
 

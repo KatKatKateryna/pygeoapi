@@ -84,31 +84,35 @@ class SpeckleProvider(BaseProvider):
 
         path = str(self.connector_installation_path(_host_application))
 
-        completed_process = run(
-            [
-                self.get_python_path(),
-                "-m",
-                "pip",
-                "install",
-                "--upgrade",
-                "specklepy==2.19.5",
-                "-t",
-                str(path),
-            ],
-            capture_output=True,
-        )
+        try:
+            import specklepy
 
-        if completed_process.returncode != 0:
-            m = f"Failed to install dependenices through pip, got {completed_process.returncode} as return code. Full log: {completed_process}"
-            print(m)
-            print(completed_process.stdout)
-            print(completed_process.stderr)
-            raise Exception(m)
+        except ModuleNotFoundError:
 
-        # to delete
-        self.connector_installation_path(_application_name)
+            completed_process = run(
+                [
+                    self.get_python_path(),
+                    "-m",
+                    "pip",
+                    "install",
+                    "--upgrade",
+                    "specklepy==2.19.5",
+                    "-t",
+                    str(path),
+                ],
+                capture_output=True,
+            )
 
-        self.load_speckle_data()
+            if completed_process.returncode != 0:
+                m = f"Failed to install dependenices through pip, got {completed_process.returncode} as return code. Full log: {completed_process}"
+                print(m)
+                print(completed_process.stdout)
+                print(completed_process.stderr)
+                raise Exception(m)
+
+        # switch self.data from URL to Dict
+        # not a great solution, but all other functions will rely on self.data
+        self.data = self.load_speckle_data()
         self.fields = self.get_fields()
 
     def get_fields(self):
@@ -120,9 +124,8 @@ class SpeckleProvider(BaseProvider):
 
         fields = {}
         LOGGER.debug("Treating all columns as string types")
-        with open(self.data) as src:
-            data = json.loads(src.read())
-        for key, value in data["features"][0]["properties"].items():
+
+        for key, value in self.data["features"][0]["properties"].items():
             if isinstance(value, float):
                 type_ = "number"
             elif isinstance(value, int):
@@ -289,25 +292,26 @@ class SpeckleProvider(BaseProvider):
 
     def load_speckle_data(self: str):
 
-        import specklepy
         from specklepy import operations
         from specklepy import StreamWrapper
         from specklepy import SpeckleException
 
         wrapper: StreamWrapper = StreamWrapper(self.data)
         client, stream = self.tryGetClient(wrapper)
-        stream = self.validateStream(stream, self.dockwidget)
+        stream = self.validateStream(stream)
         branchName = wrapper.branch_name
 
         if wrapper.commit_id == None:
-            stream = client.stream.get(id=stream.id, branch_limit=100, commit_limit=100)
+            stream = client.stream.get(
+                id=stream["id"], branch_limit=100, commit_limit=100
+            )
 
         branch = self.validateBranch(stream, branchName)
         commitId = wrapper.commit_id
-        commit = self.validateCommit(branch, commitId, self.dockwidget)
-        objId = commit.referencedObject
+        commit = self.validateCommit(branch, commitId)
+        objId = commit["referencedObject"]
 
-        if branch.name is None or commit.id is None or objId is None:
+        if branch["name"] is None or commit["id"] is None or objId is None:
             raise SpeckleException("Something went wrong")
 
         transport = self.validateTransport(client, wrapper.stream_id)
@@ -318,46 +322,44 @@ class SpeckleProvider(BaseProvider):
         commit_obj = operations.receive(objId, transport, None)
         client.commit.received(
             wrapper.stream_id,
-            commit.id,
-            source_application="QGIS" + self.gis_version.split(".")[0],
-            message="Received commit in QGIS",
+            commit["id"],
+            source_application="pygeoapi",
+            message="Received commit in pygeoapi",
         )
 
-        self.data = self.traverse_data(commit_obj)
+        return self.traverse_data(commit_obj)
 
     def traverse_data(self, commit_obj):
 
         from specklepy import Base
         from specklepy import SpeckleException
         from specklepy import Point, Line, Polyline, Mesh
-        from specklepy import GraphTraversal
+        from specklepy import GraphTraversal, TraversalRule
 
         # traverse commit
         data: Dict[str, Any] = {"type": "FeatureCollection", "features": []}
-        context_list = GraphTraversal().traverse(commit_obj)
+        rule = TraversalRule(
+            [lambda _: True],
+            lambda x: [
+                item
+                for item in x.get_member_names()
+                if isinstance(getattr(x, item, None), list)
+            ],
+        )
+        context_list = GraphTraversal([rule]).traverse(commit_obj)
 
         for item in context_list:
-
-            feature: Dict = {"type": "Feature", "geometry": {}}
 
             f_base = item.current
             f_id = item.member_name
 
-            # feature id
-            feature["id"] = f_id
-
-            # feature properties
-            feature["properties"] = {}
-            for prop_name in f_base.get_member_names():
-                value = getattr(f_base, prop_name)
-                if (
-                    isinstance(value, Base)
-                    or isinstance(value, List)
-                    or isinstance(value, Dict)
-                ):
-                    feature[prop_name] = str(value)
-                else:
-                    feature[prop_name] = value
+            # feature
+            feature: Dict = {
+                "id": f_id,
+                "type": "Feature",
+                "geometry": {},
+                "properties": {},
+            }
 
             # feature geometry
             if isinstance(f_base, Point):
@@ -368,12 +370,23 @@ class SpeckleProvider(BaseProvider):
                 feature["geometry"]["type"] = "Line"
                 feature["geometry"]["coordinates"] = []
                 for pt in f_base.as_points():
-                    feature["geometry"]["coordinates"].append([f_base.x, f_base.y])
+                    feature["geometry"]["coordinates"].append([pt.x, pt.y])
 
             else:
-                raise SpeckleException(
-                    f"Unsupported geometry type: {f_base.speckle_type}"
-                )
+                print(f"Unsupported geometry type: {f_base.speckle_type}")
+                continue
+
+            for prop_name in f_base.get_member_names():
+                value = getattr(f_base, prop_name)
+                if (
+                    isinstance(value, Base)
+                    or isinstance(value, List)
+                    or isinstance(value, Dict)
+                ):
+                    feature["properties"][prop_name] = str(value)
+                else:
+                    feature["properties"][prop_name] = value
+
             data["features"].append(feature)
 
         return data
@@ -385,12 +398,13 @@ class SpeckleProvider(BaseProvider):
 
         # from specklepy.core.api.credentials import get_local_accounts
         from specklepy import SpeckleClient
-        from specklepy import Stream
+        from specklepy import Stream, Branch, Commit
         from specklepy import SpeckleException
+        from specklepy import get_local_accounts
 
         # only streams with write access
         client = None
-        for acc in self.get_local_accounts():
+        for acc in get_local_accounts():
             # only check accounts on selected server
             if acc.serverInfo.url in sw.server_url:
                 client = SpeckleClient(
@@ -408,103 +422,51 @@ class SpeckleProvider(BaseProvider):
             stream = client.stream.get(
                 id=sw.stream_id, branch_limit=100, commit_limit=100
             )
-            if isinstance(stream, Stream):
+            if isinstance(stream, Stream) or isinstance(stream, Dict):
                 # try get stream, only read access needed
                 return client, stream
             else:
-                raise SpeckleException("Fetching Speckle Project failed")
+                raise SpeckleException(f"Fetching Speckle Project failed: {stream}")
         else:
             raise SpeckleException("SpeckleClient creation failed")
 
-    def get_local_accounts(self, base_path: Optional[str] = None) -> List["Account"]:
-        """Gets all the accounts present in this environment
-
-        Arguments:
-            base_path {str} -- custom base path if you are not using the system default
-
-        Returns:
-            List[Account] -- list of all local accounts or an empty list if
-            no accounts were found
-        """
-
-        from pathlib import Path
-        from specklepy import Account
-        from specklepy import ServerInfo
-        from specklepy import speckle_path_provider
-        from specklepy import SpeckleException
-        from specklepy import SQLiteTransport
-
-        accounts: List[Account] = []
-        try:
-            account_storage = SQLiteTransport(scope="Accounts", base_path=base_path)
-            res = account_storage.get_all_objects()
-            account_storage.close()
-            if res:
-                accounts.extend(Account.parse_raw(r[1]) for r in res)
-        except SpeckleException:
-            # cannot open SQLiteTransport, probably because of the lack
-            # of disk write permissions
-            pass
-
-        json_acct_files = []
-        json_path = str(speckle_path_provider.accounts_folder_path())
-        try:
-            os.makedirs(json_path, exist_ok=True)
-            json_acct_files.extend(
-                file for file in os.listdir(json_path) if file.endswith(".json")
-            )
-
-        except Exception:
-            # cannot find or get the json account paths
-            pass
-
-        if json_acct_files:
-            try:
-                accounts.extend(
-                    Account.model_validate_json(Path(json_path, json_file).read_text())
-                    # Account.parse_file(os.path.join(json_path, json_file))
-                    for json_file in json_acct_files
-                )
-            except Exception as ex:
-                raise SpeckleException(
-                    "Invalid json accounts could not be read. Please fix or remove them.",
-                    ex,
-                ) from ex
-
-        return accounts
-
-    def validateStream(stream: "Stream", dockwidget) -> Union["Stream", None]:
+    def validateStream(self, stream: "Stream") -> Union["Stream", None]:
 
         from specklepy import SpeckleException
+        from specklepy import Stream, Branch, Commit
 
-        if isinstance(stream, "SpeckleException"):
+        if isinstance(stream, SpeckleException):
             raise stream
-        if stream.branches is None:
+        if stream["branches"] is None:
             raise SpeckleException("Stream has no branches")
         return stream
 
-    def validateBranch(stream: "Stream", branchName: str) -> Union["Branch", None]:
+    def validateBranch(
+        self, stream: "Stream", branchName: str
+    ) -> Union["Branch", None]:
 
         from specklepy import SpeckleException
+        from specklepy import Stream, Branch, Commit
 
         branch = None
-        if not stream.branches or not stream.branches.items:
+        if not stream["branches"] or not stream["branches"]["items"]:
             return None
-        for b in stream.branches.items:
-            if b.name == branchName:
+        for b in stream["branches"]["items"]:
+            if b["name"] == branchName:
                 branch = b
                 break
         if branch is None:
             raise SpeckleException("Failed to find a branch")
-        if branch.commits is None:
+        if branch["commits"] is None:
             raise SpeckleException("Failed to find a branch")
-        if len(branch.commits.items) == 0:
+        if len(branch["commits"]["items"]) == 0:
             raise SpeckleException("Branch contains no commits")
         return branch
 
-    def validateCommit(branch: "Branch", commitId: str) -> Union["Commit", None]:
+    def validateCommit(self, branch: "Branch", commitId: str) -> Union["Commit", None]:
 
         from specklepy import SpeckleException
+        from specklepy import Stream, Branch, Commit
 
         commit = None
         try:
@@ -512,23 +474,23 @@ class SpeckleProvider(BaseProvider):
         except:
             raise SpeckleException("Commit ID is not valid")
 
-        if commitId.startswith("Latest") and len(branch.commits.items) > 0:
-            commit = branch.commits.items[0]
+        if commitId.startswith("Latest") and len(branch["commits"]["items"]) > 0:
+            commit = branch["commits"]["items"][0]
         else:
-            for i in branch.commits.items:
-                if i.id == commitId:
+            for i in branch["commits"]["items"]:
+                if i["id"] == commitId:
                     commit = i
                     break
             if commit is None:
                 try:
-                    commit = branch.commits.items[0]
+                    commit = branch["commits"]["items"][0]
                     print("Failed to find a commit. Receiving Latest")
                 except:
                     raise SpeckleException("Failed to find a commit")
         return commit
 
     def validateTransport(
-        client: "SpeckleClient", streamId: str
+        self, client: "SpeckleClient", streamId: str
     ) -> Union["ServerTransport", None]:
 
         from specklepy import get_default_account
