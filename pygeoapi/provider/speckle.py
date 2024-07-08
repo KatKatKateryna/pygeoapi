@@ -40,7 +40,8 @@ from pygeoapi.util import crs_transform
 
 LOGGER = logging.getLogger(__name__)
 _user_data_env_var = "SPECKLE_USERDATA_PATH"
-_application_name = "pygeoapi"
+_application_name = "Speckle"
+_host_application = "pygeoapi"
 
 
 class SpeckleProvider(BaseProvider):
@@ -81,7 +82,7 @@ class SpeckleProvider(BaseProvider):
 
         from subprocess import run
 
-        path = str(self.connector_installation_path(_application_name))
+        path = str(self.connector_installation_path(_host_application))
 
         completed_process = run(
             [
@@ -600,9 +601,7 @@ class SpeckleProvider(BaseProvider):
         if sys.path[0] != connector_installation_path:
             sys.path.insert(0, str(connector_installation_path))
 
-        raise Exception(
-            f"Using connector installation path {connector_installation_path}"
-        )
+        print(f"Using connector installation path {connector_installation_path}")
         return connector_installation_path
 
     def user_speckle_connector_installation_path(self, host_application: str) -> "Path":
