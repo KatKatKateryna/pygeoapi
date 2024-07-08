@@ -40,6 +40,7 @@ from pygeoapi.util import crs_transform
 
 LOGGER = logging.getLogger(__name__)
 _user_data_env_var = "SPECKLE_USERDATA_PATH"
+_application_name = "pygeoapi"
 
 
 class SpeckleProvider(BaseProvider):
@@ -72,32 +73,39 @@ class SpeckleProvider(BaseProvider):
 
         super().__init__(provider_def)
 
-        try:
-            import specklepy
-        except ModuleNotFoundError:
-            print("Installing Speckle dependencies")
+        # try:
+        #    import specklepy
 
-            from subprocess import run
+        # except ModuleNotFoundError:
+        #    print("Installing Speckle dependencies")
 
-            completed_process = run(
-                [
-                    self.get_python_path(),
-                    "-m",
-                    "pip",
-                    "install",
-                    "specklepy",
-                    "-t",
-                    "specklepy",
-                ],
-                capture_output=True,
-            )
+        from subprocess import run
 
-            if completed_process.returncode != 0:
-                m = f"Failed to install dependenices through pip, got {completed_process.returncode} as return code. Full log: {completed_process}"
-                print(m)
-                print(completed_process.stdout)
-                print(completed_process.stderr)
-                raise Exception(m)
+        path = str(self.connector_installation_path(_application_name))
+
+        completed_process = run(
+            [
+                self.get_python_path(),
+                "-m",
+                "pip",
+                "install",
+                "--upgrade",
+                "specklepy==2.19.5",
+                "-t",
+                str(path),
+            ],
+            capture_output=True,
+        )
+
+        if completed_process.returncode != 0:
+            m = f"Failed to install dependenices through pip, got {completed_process.returncode} as return code. Full log: {completed_process}"
+            print(m)
+            print(completed_process.stdout)
+            print(completed_process.stderr)
+            raise Exception(m)
+
+        # to delete
+        self.connector_installation_path(_application_name)
 
         self.load_speckle_data()
         self.fields = self.get_fields()
@@ -280,9 +288,10 @@ class SpeckleProvider(BaseProvider):
 
     def load_speckle_data(self: str):
 
-        from specklepy.core.api import operations
-        from specklepy.core.api.wrapper import StreamWrapper
-        from specklepy.logging.exceptions import SpeckleException
+        import specklepy
+        from specklepy import operations
+        from specklepy import StreamWrapper
+        from specklepy import SpeckleException
 
         wrapper: StreamWrapper = StreamWrapper(self.data)
         client, stream = self.tryGetClient(wrapper)
@@ -317,10 +326,10 @@ class SpeckleProvider(BaseProvider):
 
     def traverse_data(self, commit_obj):
 
-        from specklepy.objects import Base
-        from specklepy.logging.exceptions import SpeckleException
-        from specklepy.objects.geometry import Point, Line, Polyline, Mesh
-        from specklepy.traverse.objects.graph_traversal.traversal import GraphTraversal
+        from specklepy import Base
+        from specklepy import SpeckleException
+        from specklepy import Point, Line, Polyline, Mesh
+        from specklepy import GraphTraversal
 
         # traverse commit
         data: Dict[str, Any] = {"type": "FeatureCollection", "features": []}
@@ -369,13 +378,14 @@ class SpeckleProvider(BaseProvider):
         return data
 
     def tryGetClient(
+        self,
         sw: "StreamWrapper",
     ) -> Tuple[Union["SpeckleClient", None], Union["Stream", None]]:
 
         # from specklepy.core.api.credentials import get_local_accounts
-        from specklepy.core.api.client import SpeckleClient
-        from specklepy.core.api.models import Stream
-        from specklepy.logging.exceptions import SpeckleException
+        from specklepy import SpeckleClient
+        from specklepy import Stream
+        from specklepy import SpeckleException
 
         # only streams with write access
         client = None
@@ -417,11 +427,11 @@ class SpeckleProvider(BaseProvider):
         """
 
         from pathlib import Path
-        from specklepy.core.api.credentials import Account
-        from specklepy.core.api.models import ServerInfo
-        from specklepy.core.helpers import speckle_path_provider
-        from specklepy.logging.exceptions import SpeckleException
-        from specklepy.transports.sqlite import SQLiteTransport
+        from specklepy import Account
+        from specklepy import ServerInfo
+        from specklepy import speckle_path_provider
+        from specklepy import SpeckleException
+        from specklepy import SQLiteTransport
 
         accounts: List[Account] = []
         try:
@@ -464,7 +474,7 @@ class SpeckleProvider(BaseProvider):
 
     def validateStream(stream: "Stream", dockwidget) -> Union["Stream", None]:
 
-        from specklepy.logging.exceptions import SpeckleException
+        from specklepy import SpeckleException
 
         if isinstance(stream, "SpeckleException"):
             raise stream
@@ -474,7 +484,7 @@ class SpeckleProvider(BaseProvider):
 
     def validateBranch(stream: "Stream", branchName: str) -> Union["Branch", None]:
 
-        from specklepy.logging.exceptions import SpeckleException
+        from specklepy import SpeckleException
 
         branch = None
         if not stream.branches or not stream.branches.items:
@@ -493,7 +503,7 @@ class SpeckleProvider(BaseProvider):
 
     def validateCommit(branch: "Branch", commitId: str) -> Union["Commit", None]:
 
-        from specklepy.logging.exceptions import SpeckleException
+        from specklepy import SpeckleException
 
         commit = None
         try:
@@ -520,8 +530,8 @@ class SpeckleProvider(BaseProvider):
         client: "SpeckleClient", streamId: str
     ) -> Union["ServerTransport", None]:
 
-        from specklepy.core.api.credentials import get_default_account
-        from specklepy.transports.server import ServerTransport
+        from specklepy import get_default_account
+        from specklepy import ServerTransport
 
         account = client.account
         if not account.token:
@@ -579,3 +589,37 @@ class SpeckleProvider(BaseProvider):
         if path_override:
             return Path(path_override)
         return None
+
+    def connector_installation_path(self, host_application: str) -> "Path":
+        connector_installation_path = self.user_speckle_connector_installation_path(
+            host_application
+        )
+        connector_installation_path.mkdir(exist_ok=True, parents=True)
+
+        # set user modules path at beginning of paths for earlier hit
+        if sys.path[0] != connector_installation_path:
+            sys.path.insert(0, str(connector_installation_path))
+
+        raise Exception(
+            f"Using connector installation path {connector_installation_path}"
+        )
+        return connector_installation_path
+
+    def user_speckle_connector_installation_path(self, host_application: str) -> "Path":
+        """
+        Gets a connector specific installation folder.
+
+        In this folder we can put our connector installation and all python packages.
+        """
+        return self.ensure_folder_exists(
+            self.ensure_folder_exists(
+                self.user_speckle_folder_path(), "connector_installations"
+            ),
+            host_application,
+        )
+
+    def user_speckle_folder_path(self) -> "Path":
+        """Get the folder where the user's Speckle data should be stored."""
+        return self.ensure_folder_exists(
+            self.user_application_data_path(), _application_name
+        )
