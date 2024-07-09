@@ -568,7 +568,7 @@ class SpeckleProvider(BaseProvider):
             )
         else:
             geometry = {}
-            print(f"Unsupported geometry type: {f_base.speckle_type}")
+            # print(f"Unsupported geometry type: {f_base.speckle_type}")
 
     def reproject_2d_coords_list(self, crs, coords_in: List[list]):
 
