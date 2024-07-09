@@ -28,8 +28,10 @@
 #
 # =================================================================
 
+import copy
 import json
 import logging
+import math
 import os
 import sys
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -42,6 +44,7 @@ LOGGER = logging.getLogger(__name__)
 _user_data_env_var = "SPECKLE_USERDATA_PATH"
 _application_name = "Speckle"
 _host_application = "pygeoapi"
+SPECKLE_DATA = None
 
 
 class SpeckleProvider(BaseProvider):
@@ -86,6 +89,7 @@ class SpeckleProvider(BaseProvider):
 
         try:
             import specklepy
+            import pyproj
 
         except ModuleNotFoundError:
 
@@ -96,7 +100,7 @@ class SpeckleProvider(BaseProvider):
                     "pip",
                     "install",
                     "--upgrade",
-                    "specklepy==2.19.5",
+                    "specklepy==2.19.5 pyproj==3.6.1",
                     "-t",
                     str(path),
                 ],
@@ -112,8 +116,8 @@ class SpeckleProvider(BaseProvider):
 
         # switch self.data from URL to Dict
         # not a great solution, but all other functions will rely on self.data
-        self.data = self.load_speckle_data()
-        self.fields = self.get_fields()
+        # self.data = self.load_speckle_data()
+        # self.fields = self.get_fields()
 
     def get_fields(self):
         """
@@ -125,21 +129,34 @@ class SpeckleProvider(BaseProvider):
         fields = {}
         LOGGER.debug("Treating all columns as string types")
 
-        for key, value in self.data["features"][0]["properties"].items():
-            if isinstance(value, float):
-                type_ = "number"
-            elif isinstance(value, int):
-                type_ = "integer"
-            else:
-                type_ = "string"
+        # check if the object was extracted
+        if isinstance(self.data, Dict):
+            if len(self.data["features"]) == 0:
+                return fields
 
-            fields[key] = {"type": type_}
+            for key, value in self.data["features"][0]["properties"].items():
+                if isinstance(value, float):
+                    type_ = "number"
+                elif isinstance(value, int):
+                    type_ = "integer"
+                else:
+                    type_ = "string"
+
+                fields[key] = {"type": type_}
         return fields
 
     def _load(self, skip_geometry=None, properties=[], select_properties=[]):
         """Validate Speckle data"""
 
-        data = self.data
+        # only perform heavy operations once
+        global SPECKLE_DATA
+
+        if SPECKLE_DATA is None:
+            self.data = self.load_speckle_data()
+            SPECKLE_DATA = self.data
+            self.fields = self.get_fields()
+
+        data = SPECKLE_DATA
 
         # filter by properties if set
         if properties:
@@ -150,6 +167,8 @@ class SpeckleProvider(BaseProvider):
             ]  # noqa
 
         # All features must have ids, TODO must be unique strings
+        if isinstance(data, str):
+            raise Exception(data)
         for i in data["features"]:
             if "id" not in i and self.id_field in i["properties"]:
                 i["id"] = i["properties"][self.id_field]
@@ -326,70 +345,237 @@ class SpeckleProvider(BaseProvider):
             source_application="pygeoapi",
             message="Received commit in pygeoapi",
         )
-
         return self.traverse_data(commit_obj)
 
     def traverse_data(self, commit_obj):
 
-        from specklepy import Base
-        from specklepy import SpeckleException
-        from specklepy import Point, Line, Polyline, Mesh
+        from specklepy import Point, Line, Polyline, Curve, Mesh
+        from specklepy import GisPolygonElement
         from specklepy import GraphTraversal, TraversalRule
 
+        supported_types = [Point, Line, Polyline, Curve, GisPolygonElement, Mesh]
         # traverse commit
         data: Dict[str, Any] = {"type": "FeatureCollection", "features": []}
+        self.assign_crs(data)
+
         rule = TraversalRule(
             [lambda _: True],
             lambda x: [
                 item
                 for item in x.get_member_names()
                 if isinstance(getattr(x, item, None), list)
+                and type(x) not in supported_types
             ],
         )
-        context_list = GraphTraversal([rule]).traverse(commit_obj)
+        context_list = [x for x in GraphTraversal([rule]).traverse(commit_obj)]
 
+        # iterate to get CRS
+        crs = None
         for item in context_list:
+            if (
+                crs is None
+                and item.current.speckle_type.endswith("Layer")
+                and hasattr(item.current, "crs")
+            ):
+                crs = item.current["crs"]
+                break
+
+        # if crs not found, generate one
+        lat = 51.52639857808991
+        lon = 0.15602138593951376
+        if crs is None:
+            wkt = f'PROJCS["SpeckleCRS_latlon_{lat}_{lon}", GEOGCS["GCS_WGS_1984", DATUM["D_WGS_1984", SPHEROID["WGS_1984", 6378137.0, 298.257223563]], PRIMEM["Greenwich", 0.0], UNIT["Degree", 0.0174532925199433]], PROJECTION["Transverse_Mercator"], PARAMETER["False_Easting", 0.0], PARAMETER["False_Northing", 0.0], PARAMETER["Central_Meridian", {lon}], PARAMETER["Scale_Factor", 1.0], PARAMETER["Latitude_Of_Origin", {lat}], UNIT["Meter", 1.0]]'
+            crs = {"wkt": wkt, "offset_x": 0, "offset_y": 0, "rotation": 0}
+
+        # iterate to get features
+        list_len = len(context_list)
+
+        load = 0
+        print(f"{load}% loaded")
+
+        for i, item in enumerate(context_list):
+            new_load = round(i / list_len * 10, 1) * 10
+            if new_load % 10 == 0 and new_load != load:
+                load = round(i / list_len * 100)
+                print(f"{load}% loaded")
 
             f_base = item.current
-            f_id = item.member_name
+            f_id = item.current.id
 
             # feature
             feature: Dict = {
-                "id": f_id,
                 "type": "Feature",
                 "geometry": {},
-                "properties": {},
+                "properties": {
+                    "fid": len(data["features"]),
+                    "id": f_id,
+                },
             }
 
             # feature geometry
-            if isinstance(f_base, Point):
-                feature["geometry"]["type"] = "Point"
-                feature["geometry"]["coordinates"] = [f_base.x, f_base.y]
+            self.assign_geometry(crs, feature["geometry"], f_base)
+            if feature["geometry"] != {}:
+                self.assign_props(f_base, feature["properties"])
+                data["features"].append(feature)
 
-            if isinstance(f_base, Polyline):
-                feature["geometry"]["type"] = "Line"
-                feature["geometry"]["coordinates"] = []
-                for pt in f_base.as_points():
-                    feature["geometry"]["coordinates"].append([pt.x, pt.y])
-
-            else:
-                print(f"Unsupported geometry type: {f_base.speckle_type}")
-                continue
-
-            for prop_name in f_base.get_member_names():
-                value = getattr(f_base, prop_name)
-                if (
-                    isinstance(value, Base)
-                    or isinstance(value, List)
-                    or isinstance(value, Dict)
-                ):
-                    feature["properties"][prop_name] = str(value)
-                else:
-                    feature["properties"][prop_name] = value
-
-            data["features"].append(feature)
+                # raise Exception(feature)
 
         return data
+
+    def assign_geometry(self, crs, geometry: Dict, f_base):
+
+        from specklepy import Point, Line, Polyline, Curve, Mesh
+        from specklepy import GisPolygonElement
+
+        if isinstance(f_base, Point):
+            geometry["type"] = "Point"
+            geometry["coordinates"] = self.reproject_2d_coords(
+                crs, [f_base.x, f_base.y]
+            )
+
+        elif isinstance(f_base, Mesh):
+            geometry["type"] = "MultiPolygon"
+            geometry["coordinates"] = []
+
+            count: int = 0
+            for i, pt_count in enumerate(f_base.faces):
+                if i != count:
+                    continue
+
+                # old encoding
+                if pt_count == 0:
+                    pt_count = 3
+                elif pt_count == 1:
+                    pt_count = 4
+
+                new_poly = []
+                boundary = []
+
+                for vertex_index in f_base.faces[count + 1 : count + 1 + pt_count]:
+                    x = f_base.vertices[vertex_index * 3]
+                    y = f_base.vertices[vertex_index * 3 + 1]
+                    boundary.append(self.reproject_2d_coords(crs, [x, y]))
+
+                new_poly.append(boundary)
+                count += pt_count + 1
+
+            geometry["coordinates"].append(new_poly)
+
+        if isinstance(f_base, GisPolygonElement):
+            geometry["type"] = "MultiPolygon"
+            geometry["coordinates"] = []
+
+            for polygon in f_base.geometry:
+                new_poly = []
+                boundary = []
+                for pt in polygon.boundary.as_points():
+                    boundary.append(self.reproject_2d_coords(crs, [pt.x, pt.y]))
+                new_poly.append(boundary)
+
+                for void in polygon.voids:
+                    new_void = []
+                    for pt_void in void.as_points():
+                        new_void.append(
+                            self.reproject_2d_coords(crs, [pt_void.x, pt_void.y])
+                        )
+                    new_poly.append(new_void)
+                geometry["coordinates"].append(new_poly)
+
+        elif isinstance(f_base, Line):
+            geometry["type"] = "LineString"
+            geometry["coordinates"] = [[f_base.start, f_base.end]]
+
+        elif isinstance(f_base, Polyline):
+            geometry["type"] = "LineString"
+            geometry["coordinates"] = []
+            for pt in f_base.as_points():
+                geometry["coordinates"].append(
+                    self.reproject_2d_coords(crs, [pt.x, pt.y])
+                )
+        elif isinstance(f_base, Curve):
+            geometry["type"] = "LineString"
+            geometry["coordinates"] = []
+            for pt in f_base.displayValue.as_points():
+                geometry["coordinates"].append(
+                    self.reproject_2d_coords(crs, [pt.x, pt.y])
+                )
+        else:
+            geometry = {}
+        #   print(f"Unsupported geometry type: {f_base.speckle_type}")
+
+    def reproject_2d_coords(self, crs, coords_in: list):
+        # return coords_in
+
+        from pyproj import Transformer
+        from pyproj import CRS
+
+        coords_offset = self.offset_rotate(crs, [coords_in[0], coords_in[1]])
+
+        transformer = Transformer.from_crs(
+            CRS.from_user_input(crs["wkt"]),
+            CRS.from_user_input(4326),
+            always_xy=True,
+        )
+        for pt in transformer.itransform([coords_offset]):
+            return [pt[0], pt[1]]
+
+    def offset_rotate(self, crs, coords_in: list):
+
+        a = crs["rotation"] * math.pi / 180
+        x2 = coords_in[0] * math.cos(a) - coords_in[1] * math.sin(a)
+        y2 = coords_in[0] * math.sin(a) + coords_in[1] * math.cos(a)
+
+        return [x2 + crs["offset_x"], y2 + crs["offset_y"]]
+
+    def assign_crs(self, data: Dict):
+
+        crs = {
+            "crs": {
+                "type": "name",
+                "properties": {"name": "urn:ogc:def:crs:OGC:1.3:CRS84"},
+            }
+        }
+
+        r"""
+        crs = {
+            "crs": {
+                "type": "link",
+                "properties": {"href": "wkt.txt", "type": "ogcwkt"},
+            }
+        }
+        """
+        data["crs"] = crs
+
+    def assign_props(self, obj, props):
+        from specklepy import Base
+
+        for prop_name in obj.get_member_names():
+            value = getattr(obj, prop_name)
+            if (
+                prop_name
+                in [
+                    "geometry",
+                    "units",
+                    "totalChildrenCount",
+                    "vertices",
+                    "faces",
+                    "displayValue",
+                    "textureCoordinates",
+                    "renderMaterial",
+                ]
+                or prop_name.lower() == "id"
+            ):
+                pass
+            elif isinstance(value, Base) and prop_name == "attributes":
+                self.assign_props(value, props)
+            elif (
+                isinstance(value, Base)
+                or isinstance(value, List)
+                or isinstance(value, Dict)
+            ):
+                props[prop_name] = str(value)
+            else:
+                props[prop_name] = value
 
     def tryGetClient(
         self,
@@ -472,10 +658,11 @@ class SpeckleProvider(BaseProvider):
         try:
             commitId = commitId.split(" | ")[0]
         except:
-            raise SpeckleException("Commit ID is not valid")
+            if len(branch["commits"]["items"]) > 0:
+                commit = branch["commits"]["items"][0]
+            else:
+                raise SpeckleException("Commit ID is not valid")
 
-        if commitId.startswith("Latest") and len(branch["commits"]["items"]) > 0:
-            commit = branch["commits"]["items"][0]
         else:
             for i in branch["commits"]["items"]:
                 if i["id"] == commitId:
@@ -563,7 +750,7 @@ class SpeckleProvider(BaseProvider):
         if sys.path[0] != connector_installation_path:
             sys.path.insert(0, str(connector_installation_path))
 
-        print(f"Using connector installation path {connector_installation_path}")
+        # print(f"Using connector installation path {connector_installation_path}")
         return connector_installation_path
 
     def user_speckle_connector_installation_path(self, host_application: str) -> "Path":
