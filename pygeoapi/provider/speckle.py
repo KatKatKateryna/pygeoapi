@@ -151,7 +151,13 @@ class SpeckleProvider(BaseProvider):
         # only perform heavy operations once
         global SPECKLE_DATA
 
-        if SPECKLE_DATA is None:
+        # ridiculous check, in case features are saved as ["@id"] something
+        if SPECKLE_DATA is None or (
+            isinstance(SPECKLE_DATA, dict)
+            and hasattr(SPECKLE_DATA, "features")
+            and len(SPECKLE_DATA["features"]) > 0
+            and not hasattr(SPECKLE_DATA["features"][0], "properties")
+        ):
             self.data = self.load_speckle_data()
             SPECKLE_DATA = self.data
             self.fields = self.get_fields()
@@ -170,6 +176,13 @@ class SpeckleProvider(BaseProvider):
         if isinstance(data, str):
             raise Exception(data)
         for i in data["features"]:
+            # for some reason dictionary is changed to list of links
+            try:
+                i["properties"]
+            except:
+                SPECKLE_DATA = None
+                return self._load()
+
             if "id" not in i and self.id_field in i["properties"]:
                 i["id"] = i["properties"][self.id_field]
             if skip_geometry:
@@ -355,7 +368,10 @@ class SpeckleProvider(BaseProvider):
 
         supported_types = [Point, Line, Polyline, Curve, GisPolygonElement, Mesh, Brep]
         # traverse commit
-        data: Dict[str, Any] = {"type": "FeatureCollection", "features": []}
+        data: Dict[str, Any] = {
+            "type": "FeatureCollection",
+            "features": [],
+        }
         self.assign_crs(data)
 
         rule = TraversalRule(

@@ -122,7 +122,7 @@
     var map = L.map('collection-map').setView([{{ 0 }}, {{ 0 }}], 1);
     map.addLayer(new L.TileLayer(
       '{{ config['server']['map']['url'] }}', {
-        maxZoom: 18,
+        maxZoom: 22,
         attribution: '{{ config['server']['map']['attribution'] | safe }}'
       }
     ));
