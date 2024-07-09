@@ -349,11 +349,11 @@ class SpeckleProvider(BaseProvider):
 
     def traverse_data(self, commit_obj):
 
-        from specklepy import Point, Line, Polyline, Curve, Mesh
+        from specklepy import Point, Line, Polyline, Curve, Mesh, Brep
         from specklepy import GisPolygonElement
         from specklepy import GraphTraversal, TraversalRule
 
-        supported_types = [Point, Line, Polyline, Curve, GisPolygonElement, Mesh]
+        supported_types = [Point, Line, Polyline, Curve, GisPolygonElement, Mesh, Brep]
         # traverse commit
         data: Dict[str, Any] = {"type": "FeatureCollection", "features": []}
         self.assign_crs(data)
@@ -424,7 +424,7 @@ class SpeckleProvider(BaseProvider):
 
     def assign_geometry(self, crs, geometry: Dict, f_base):
 
-        from specklepy import Point, Line, Polyline, Curve, Mesh
+        from specklepy import Point, Line, Polyline, Curve, Mesh, Brep
         from specklepy import GisPolygonElement
 
         if isinstance(f_base, Point):
@@ -433,12 +433,30 @@ class SpeckleProvider(BaseProvider):
                 crs, [f_base.x, f_base.y]
             )
 
-        elif isinstance(f_base, Mesh):
+        if isinstance(f_base, Point):
+            geometry["type"] = "Point"
+            geometry["coordinates"] = self.reproject_2d_coords(
+                crs, [f_base.x, f_base.y]
+            )
+
+        elif isinstance(f_base, Mesh) or isinstance(f_base, Brep):
+            faces = []
+            vertices = []
+            if isinstance(f_base, Mesh):
+                faces = f_base.faces
+                vertices = f_base.vertices
+            elif isinstance(f_base, Brep):
+                if len(f_base.displayValue[0]) == 0:
+                    geometry = {}
+                    return
+                faces = f_base.displayValue[0].faces
+                vertices = f_base.displayValue[0].vertices
+
             geometry["type"] = "MultiPolygon"
             geometry["coordinates"] = []
 
             count: int = 0
-            for i, pt_count in enumerate(f_base.faces):
+            for i, pt_count in enumerate(faces):
                 if i != count:
                     continue
 
@@ -451,17 +469,16 @@ class SpeckleProvider(BaseProvider):
                 new_poly = []
                 boundary = []
 
-                for vertex_index in f_base.faces[count + 1 : count + 1 + pt_count]:
-                    x = f_base.vertices[vertex_index * 3]
-                    y = f_base.vertices[vertex_index * 3 + 1]
+                for vertex_index in faces[count + 1 : count + 1 + pt_count]:
+                    x = vertices[vertex_index * 3]
+                    y = vertices[vertex_index * 3 + 1]
                     boundary.append(self.reproject_2d_coords(crs, [x, y]))
 
                 new_poly.append(boundary)
+                geometry["coordinates"].append(new_poly)
                 count += pt_count + 1
 
-            geometry["coordinates"].append(new_poly)
-
-        if isinstance(f_base, GisPolygonElement):
+        elif isinstance(f_base, GisPolygonElement):
             geometry["type"] = "MultiPolygon"
             geometry["coordinates"] = []
 
@@ -483,7 +500,9 @@ class SpeckleProvider(BaseProvider):
 
         elif isinstance(f_base, Line):
             geometry["type"] = "LineString"
-            geometry["coordinates"] = [[f_base.start, f_base.end]]
+            start = self.reproject_2d_coords(crs, [f_base.start.x, f_base.start.y])
+            end = self.reproject_2d_coords(crs, [f_base.end.x, f_base.end.y])
+            geometry["coordinates"] = [start, end]
 
         elif isinstance(f_base, Polyline):
             geometry["type"] = "LineString"
@@ -501,7 +520,7 @@ class SpeckleProvider(BaseProvider):
                 )
         else:
             geometry = {}
-        #   print(f"Unsupported geometry type: {f_base.speckle_type}")
+            print(f"Unsupported geometry type: {f_base.speckle_type}")
 
     def reproject_2d_coords(self, crs, coords_in: list):
         # return coords_in
@@ -563,7 +582,7 @@ class SpeckleProvider(BaseProvider):
                     "textureCoordinates",
                     "renderMaterial",
                 ]
-                or prop_name.lower() == "id"
+                # or prop_name.lower() == "id"
             ):
                 pass
             elif isinstance(value, Base) and prop_name == "attributes":
