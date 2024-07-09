@@ -34,6 +34,7 @@ import logging
 import math
 import os
 import sys
+from functools import lru_cache
 from typing import Any, Dict, List, Optional, Tuple, Union
 import uuid
 
@@ -322,6 +323,7 @@ class SpeckleProvider(BaseProvider):
     def __repr__(self):
         return f"<SpeckleProvider> {self.data}"
 
+    @lru_cache(maxsize=None)
     def load_speckle_data(self: str):
 
         from specklepy import operations
@@ -332,6 +334,8 @@ class SpeckleProvider(BaseProvider):
         client, stream = self.tryGetClient(wrapper)
         stream = self.validateStream(stream)
         branchName = wrapper.branch_name
+        if branchName is None:
+            branchName = "main"
 
         if wrapper.commit_id == None:
             stream = client.stream.get(
@@ -401,8 +405,8 @@ class SpeckleProvider(BaseProvider):
                 displayUnits = item.current.units
 
         # if crs not found, generate one
-        lat = 51.52639857808991
-        lon = 0.15602138593951376
+        lat = 51.52486388756923  # 51.52639857808991
+        lon = 0.1621445437168942  # 0.15602138593951376
         if crs is None:
             wkt = f'PROJCS["SpeckleCRS_latlon_{lat}_{lon}", GEOGCS["GCS_WGS_1984", DATUM["D_WGS_1984", SPHEROID["WGS_1984", 6378137.0, 298.257223563]], PRIMEM["Greenwich", 0.0], UNIT["Degree", 0.0174532925199433]], PROJECTION["Transverse_Mercator"], PARAMETER["False_Easting", 0.0], PARAMETER["False_Northing", 0.0], PARAMETER["Central_Meridian", {lon}], PARAMETER["Scale_Factor", 1.0], PARAMETER["Latitude_Of_Origin", {lat}], UNIT["Meter", 1.0]]'
             crs = {
