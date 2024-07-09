@@ -395,6 +395,8 @@ class SpeckleProvider(BaseProvider):
 
         for i, item in enumerate(context_list):
             new_load = round(i / list_len * 10, 1) * 10
+            # if new_load >= 10:
+            #    break
             if new_load % 10 == 0 and new_load != load:
                 load = round(i / list_len * 100)
                 print(f"{load}% loaded")
@@ -433,12 +435,6 @@ class SpeckleProvider(BaseProvider):
                 crs, [f_base.x, f_base.y]
             )
 
-        if isinstance(f_base, Point):
-            geometry["type"] = "Point"
-            geometry["coordinates"] = self.reproject_2d_coords(
-                crs, [f_base.x, f_base.y]
-            )
-
         elif isinstance(f_base, Mesh) or isinstance(f_base, Brep):
             faces = []
             vertices = []
@@ -446,16 +442,25 @@ class SpeckleProvider(BaseProvider):
                 faces = f_base.faces
                 vertices = f_base.vertices
             elif isinstance(f_base, Brep):
-                if len(f_base.displayValue[0]) == 0:
+                if f_base.displayValue is None or (
+                    isinstance(f_base.displayValue, list)
+                    and len(f_base.displayValue) == 0
+                ):
                     geometry = {}
                     return
-                faces = f_base.displayValue[0].faces
-                vertices = f_base.displayValue[0].vertices
+                elif isinstance(f_base.displayValue, list):
+                    faces = f_base.displayValue[0].faces
+                    vertices = f_base.displayValue[0].vertices
+                else:
+                    faces = f_base.displayValue.faces
+                    vertices = f_base.displayValue.vertices
 
             geometry["type"] = "MultiPolygon"
             geometry["coordinates"] = []
 
             count: int = 0
+            all_face_counts = []
+            flat_boundaries_list = []
             for i, pt_count in enumerate(faces):
                 if i != count:
                     continue
@@ -465,6 +470,7 @@ class SpeckleProvider(BaseProvider):
                     pt_count = 3
                 elif pt_count == 1:
                     pt_count = 4
+                all_face_counts.append(pt_count)
 
                 new_poly = []
                 boundary = []
@@ -472,11 +478,20 @@ class SpeckleProvider(BaseProvider):
                 for vertex_index in faces[count + 1 : count + 1 + pt_count]:
                     x = vertices[vertex_index * 3]
                     y = vertices[vertex_index * 3 + 1]
-                    boundary.append(self.reproject_2d_coords(crs, [x, y]))
+                    flat_boundaries_list.append([x, y])
 
                 new_poly.append(boundary)
                 geometry["coordinates"].append(new_poly)
                 count += pt_count + 1
+
+            flat_boundaries_list_reprojected = self.reproject_2d_coords_list(
+                crs, flat_boundaries_list
+            )
+            for i, face_c in enumerate(all_face_counts):
+                geometry["coordinates"][i] = [flat_boundaries_list_reprojected[:face_c]]
+                flat_boundaries_list_reprojected = flat_boundaries_list_reprojected[
+                    face_c:
+                ]
 
         elif isinstance(f_base, GisPolygonElement):
             geometry["type"] = "MultiPolygon"
@@ -487,6 +502,7 @@ class SpeckleProvider(BaseProvider):
                 boundary = []
                 for pt in polygon.boundary.as_points():
                     boundary.append(self.reproject_2d_coords(crs, [pt.x, pt.y]))
+                boundary = self.reproject_2d_coords_list(crs, boundary)
                 new_poly.append(boundary)
 
                 for void in polygon.voids:
@@ -495,6 +511,7 @@ class SpeckleProvider(BaseProvider):
                         new_void.append(
                             self.reproject_2d_coords(crs, [pt_void.x, pt_void.y])
                         )
+                    new_void = self.reproject_2d_coords_list(crs, new_void)
                     new_poly.append(new_void)
                 geometry["coordinates"].append(new_poly)
 
@@ -503,6 +520,9 @@ class SpeckleProvider(BaseProvider):
             start = self.reproject_2d_coords(crs, [f_base.start.x, f_base.start.y])
             end = self.reproject_2d_coords(crs, [f_base.end.x, f_base.end.y])
             geometry["coordinates"] = [start, end]
+            geometry["coordinates"] = self.reproject_2d_coords_list(
+                crs, geometry["coordinates"]
+            )
 
         elif isinstance(f_base, Polyline):
             geometry["type"] = "LineString"
@@ -511,6 +531,9 @@ class SpeckleProvider(BaseProvider):
                 geometry["coordinates"].append(
                     self.reproject_2d_coords(crs, [pt.x, pt.y])
                 )
+            geometry["coordinates"] = self.reproject_2d_coords_list(
+                crs, geometry["coordinates"]
+            )
         elif isinstance(f_base, Curve):
             geometry["type"] = "LineString"
             geometry["coordinates"] = []
@@ -518,33 +541,42 @@ class SpeckleProvider(BaseProvider):
                 geometry["coordinates"].append(
                     self.reproject_2d_coords(crs, [pt.x, pt.y])
                 )
+            geometry["coordinates"] = self.reproject_2d_coords_list(
+                crs, geometry["coordinates"]
+            )
         else:
             geometry = {}
             print(f"Unsupported geometry type: {f_base.speckle_type}")
 
-    def reproject_2d_coords(self, crs, coords_in: list):
+    def reproject_2d_coords(self, crs, coords_in: List):
+        return coords_in
+
+    def reproject_2d_coords_list(self, crs, coords_in: List[list]):
         # return coords_in
 
         from pyproj import Transformer
         from pyproj import CRS
 
-        coords_offset = self.offset_rotate(crs, [coords_in[0], coords_in[1]])
+        coords_offset = self.offset_rotate(crs, copy.deepcopy(coords_in))
 
         transformer = Transformer.from_crs(
             CRS.from_user_input(crs["wkt"]),
             CRS.from_user_input(4326),
             always_xy=True,
         )
-        for pt in transformer.itransform([coords_offset]):
-            return [pt[0], pt[1]]
+        # raise Exception(coords_offset)
+        return [[pt[0], pt[1]] for pt in transformer.itransform(coords_offset)]
 
-    def offset_rotate(self, crs, coords_in: list):
+    def offset_rotate(self, crs, coords_in: List[list]):
 
-        a = crs["rotation"] * math.pi / 180
-        x2 = coords_in[0] * math.cos(a) - coords_in[1] * math.sin(a)
-        y2 = coords_in[0] * math.sin(a) + coords_in[1] * math.cos(a)
+        final_coords = []
+        for coord in coords_in:
+            a = crs["rotation"] * math.pi / 180
+            x2 = coord[0] * math.cos(a) - coord[1] * math.sin(a)
+            y2 = coord[0] * math.sin(a) + coord[1] * math.cos(a)
+            final_coords.append([x2 + crs["offset_x"], y2 + crs["offset_y"]])
 
-        return [x2 + crs["offset_x"], y2 + crs["offset_y"]]
+        return final_coords
 
     def assign_crs(self, data: Dict):
 
