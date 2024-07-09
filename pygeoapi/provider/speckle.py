@@ -371,6 +371,7 @@ class SpeckleProvider(BaseProvider):
 
         # iterate to get CRS
         crs = None
+        displayUnits = None
         for item in context_list:
             if (
                 crs is None
@@ -378,14 +379,23 @@ class SpeckleProvider(BaseProvider):
                 and hasattr(item.current, "crs")
             ):
                 crs = item.current["crs"]
+                displayUnits = crs["units_native"]
                 break
+            elif displayUnits is None and type(item.current) in supported_types:
+                displayUnits = item.current.units
 
         # if crs not found, generate one
         lat = 51.52639857808991
         lon = 0.15602138593951376
         if crs is None:
             wkt = f'PROJCS["SpeckleCRS_latlon_{lat}_{lon}", GEOGCS["GCS_WGS_1984", DATUM["D_WGS_1984", SPHEROID["WGS_1984", 6378137.0, 298.257223563]], PRIMEM["Greenwich", 0.0], UNIT["Degree", 0.0174532925199433]], PROJECTION["Transverse_Mercator"], PARAMETER["False_Easting", 0.0], PARAMETER["False_Northing", 0.0], PARAMETER["Central_Meridian", {lon}], PARAMETER["Scale_Factor", 1.0], PARAMETER["Latitude_Of_Origin", {lat}], UNIT["Meter", 1.0]]'
-            crs = {"wkt": wkt, "offset_x": 0, "offset_y": 0, "rotation": 0}
+            crs = {
+                "wkt": wkt,
+                "offset_x": 0,
+                "offset_y": 0,
+                "rotation": 0,
+                "units_native": displayUnits,
+            }
 
         # iterate to get features
         list_len = len(context_list)
@@ -431,9 +441,9 @@ class SpeckleProvider(BaseProvider):
 
         if isinstance(f_base, Point):
             geometry["type"] = "Point"
-            geometry["coordinates"] = self.reproject_2d_coords(
-                crs, [f_base.x, f_base.y]
-            )
+            geometry["coordinates"] = self.reproject_2d_coords_list(
+                crs, [[f_base.x, f_base.y]]
+            )[0]
 
         elif isinstance(f_base, Mesh) or isinstance(f_base, Brep):
             faces = []
@@ -501,24 +511,22 @@ class SpeckleProvider(BaseProvider):
                 new_poly = []
                 boundary = []
                 for pt in polygon.boundary.as_points():
-                    boundary.append(self.reproject_2d_coords(crs, [pt.x, pt.y]))
+                    boundary.append([pt.x, pt.y])
                 boundary = self.reproject_2d_coords_list(crs, boundary)
                 new_poly.append(boundary)
 
                 for void in polygon.voids:
                     new_void = []
                     for pt_void in void.as_points():
-                        new_void.append(
-                            self.reproject_2d_coords(crs, [pt_void.x, pt_void.y])
-                        )
+                        new_void.append([pt_void.x, pt_void.y])
                     new_void = self.reproject_2d_coords_list(crs, new_void)
                     new_poly.append(new_void)
                 geometry["coordinates"].append(new_poly)
 
         elif isinstance(f_base, Line):
             geometry["type"] = "LineString"
-            start = self.reproject_2d_coords(crs, [f_base.start.x, f_base.start.y])
-            end = self.reproject_2d_coords(crs, [f_base.end.x, f_base.end.y])
+            start = [f_base.start.x, f_base.start.y]
+            end = [f_base.end.x, f_base.end.y]
             geometry["coordinates"] = [start, end]
             geometry["coordinates"] = self.reproject_2d_coords_list(
                 crs, geometry["coordinates"]
@@ -528,9 +536,7 @@ class SpeckleProvider(BaseProvider):
             geometry["type"] = "LineString"
             geometry["coordinates"] = []
             for pt in f_base.as_points():
-                geometry["coordinates"].append(
-                    self.reproject_2d_coords(crs, [pt.x, pt.y])
-                )
+                geometry["coordinates"].append([pt.x, pt.y])
             geometry["coordinates"] = self.reproject_2d_coords_list(
                 crs, geometry["coordinates"]
             )
@@ -538,9 +544,7 @@ class SpeckleProvider(BaseProvider):
             geometry["type"] = "LineString"
             geometry["coordinates"] = []
             for pt in f_base.displayValue.as_points():
-                geometry["coordinates"].append(
-                    self.reproject_2d_coords(crs, [pt.x, pt.y])
-                )
+                geometry["coordinates"].append([pt.x, pt.y])
             geometry["coordinates"] = self.reproject_2d_coords_list(
                 crs, geometry["coordinates"]
             )
@@ -548,11 +552,7 @@ class SpeckleProvider(BaseProvider):
             geometry = {}
             print(f"Unsupported geometry type: {f_base.speckle_type}")
 
-    def reproject_2d_coords(self, crs, coords_in: List):
-        return coords_in
-
     def reproject_2d_coords_list(self, crs, coords_in: List[list]):
-        # return coords_in
 
         from pyproj import Transformer
         from pyproj import CRS
@@ -564,17 +564,26 @@ class SpeckleProvider(BaseProvider):
             CRS.from_user_input(4326),
             always_xy=True,
         )
-        # raise Exception(coords_offset)
         return [[pt[0], pt[1]] for pt in transformer.itransform(coords_offset)]
 
     def offset_rotate(self, crs, coords_in: List[list]):
+        from specklepy import get_scale_factor_from_string
+
+        scale_factor = 1
+        if isinstance(crs["units_native"], str):
+            scale_factor = get_scale_factor_from_string(crs["units_native"], "m")
 
         final_coords = []
         for coord in coords_in:
             a = crs["rotation"] * math.pi / 180
             x2 = coord[0] * math.cos(a) - coord[1] * math.sin(a)
             y2 = coord[0] * math.sin(a) + coord[1] * math.cos(a)
-            final_coords.append([x2 + crs["offset_x"], y2 + crs["offset_y"]])
+            final_coords.append(
+                [
+                    scale_factor * (x2 + crs["offset_x"]),
+                    scale_factor * (y2 + crs["offset_y"]),
+                ]
+            )
 
         return final_coords
 
@@ -611,6 +620,7 @@ class SpeckleProvider(BaseProvider):
                     "vertices",
                     "faces",
                     "displayValue",
+                    "displayStyle",
                     "textureCoordinates",
                     "renderMaterial",
                 ]
