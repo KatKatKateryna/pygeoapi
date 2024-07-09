@@ -34,7 +34,6 @@ import logging
 import math
 import os
 import sys
-from functools import lru_cache
 from typing import Any, Dict, List, Optional, Tuple, Union
 import uuid
 
@@ -323,7 +322,6 @@ class SpeckleProvider(BaseProvider):
     def __repr__(self):
         return f"<SpeckleProvider> {self.data}"
 
-    @lru_cache(maxsize=None)
     def load_speckle_data(self: str):
 
         from specklepy import operations
