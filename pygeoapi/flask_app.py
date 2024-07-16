@@ -156,6 +156,9 @@ def execute_from_flask(
     :returns: A Response instance
     """
 
+    CONFIG = get_config(request=request)
+    api_ = API(CONFIG, OPENAPI)
+
     api_request = APIRequest.from_flask(request, api_.locales)
 
     content: Union[str, bytes]
@@ -190,6 +193,7 @@ def openapi():
     :returns: HTTP response
     """
     CONFIG = get_config(request=request)
+    api_ = API(CONFIG, OPENAPI)
     return get_response(api_.openapi_(request))
 
 
@@ -201,6 +205,7 @@ def conformance():
     :returns: HTTP response
     """
     CONFIG = get_config(request=request)
+    api_ = API(CONFIG, OPENAPI)
     return get_response(api_.conformance(request))
 
 

@@ -960,7 +960,6 @@ class API:
         collections = filter_dict_by_key_value(
             self.config["resources"], "type", "collection"
         )
-        # raise Exception(collections)
         if all([dataset is not None, dataset not in collections.keys()]):
             msg = "Collection not found"
             return self.get_exception(
