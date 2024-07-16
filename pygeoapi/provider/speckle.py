@@ -111,7 +111,7 @@ class SpeckleProvider(BaseProvider):
                 raise Exception(m)
         # """
         self.speckle_data = None
-        self.url = self.data  # untrimmed request URL
+        self.url = self.data.split("&")[0]
         self.lat = 51.52486388756923
         self.lon = 0.1621445437168942
         self.north_degrees = 0
@@ -184,11 +184,15 @@ class SpeckleProvider(BaseProvider):
             new_request = False
 
         # check if self.data was updated OR if features were not created yet
-        if new_request is True or (
-            isinstance(self.speckle_data, dict)
-            and hasattr(self.speckle_data, "features")
-            and len(self.speckle_data["features"]) > 0
-            and not hasattr(self.speckle_data["features"][0], "properties")
+        if (
+            new_request is True
+            or self.speckle_data is None
+            or (
+                isinstance(self.speckle_data, dict)
+                and hasattr(self.speckle_data, "features")
+                and len(self.speckle_data["features"]) > 0
+                and not hasattr(self.speckle_data["features"][0], "properties")
+            )
         ):
             self.speckle_data = self.load_speckle_data()
             self.fields = self.get_fields()
