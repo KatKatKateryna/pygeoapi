@@ -45,7 +45,6 @@ LOGGER = logging.getLogger(__name__)
 _user_data_env_var = "SPECKLE_USERDATA_PATH"
 _application_name = "Speckle"
 _host_application = "pygeoapi"
-SPECKLE_DATA = None
 
 
 class SpeckleProvider(BaseProvider):
@@ -111,14 +110,11 @@ class SpeckleProvider(BaseProvider):
                 print(completed_process.stderr)
                 raise Exception(m)
         # """
-        # switch self.data from URL to Dict
-        # not a great solution, but all other functions will rely on self.data
-        # self.data = self.load_speckle_data()
-        # self.fields = self.get_fields()
-        self.url = self.data
+        self.speckle_data = None
+        self.url = self.data  # untrimmed request URL
         self.lat = 51.52486388756923
         self.lon = 0.1621445437168942
-        self.north = 0
+        self.north_degrees = 0
 
     def get_fields(self):
         """
@@ -131,11 +127,11 @@ class SpeckleProvider(BaseProvider):
         LOGGER.debug("Treating all columns as string types")
 
         # check if the object was extracted
-        if isinstance(self.data, Dict):
-            if len(self.data["features"]) == 0:
+        if isinstance(self.speckle_data, Dict):
+            if len(self.speckle_data["features"]) == 0:
                 return fields
 
-            for key, value in self.data["features"][0]["properties"].items():
+            for key, value in self.speckle_data["features"][0]["properties"].items():
                 if isinstance(value, float):
                     type_ = "number"
                 elif isinstance(value, int):
@@ -148,9 +144,6 @@ class SpeckleProvider(BaseProvider):
 
     def _load(self, skip_geometry=None, properties=[], select_properties=[]):
         """Validate Speckle data"""
-
-        # only perform heavy operations once
-        global SPECKLE_DATA
 
         if (
             isinstance(self.data, str)
@@ -165,26 +158,20 @@ class SpeckleProvider(BaseProvider):
                     self.lat = float(item.split("lat=")[1])
                 elif "lon=" in item:
                     self.lon = float(item.split("lon=")[1])
-                elif "north=" in item:
-                    self.north = float(item.split("north=")[1])
+                elif "northDegrees=" in item:
+                    self.north_degrees = float(item.split("northDegrees=")[1])
 
         # ridiculous check, in case features are saved as ["@id"] something
-
-        if (
-            SPECKLE_DATA is None
-            or (
-                isinstance(SPECKLE_DATA, dict)
-                and hasattr(SPECKLE_DATA, "features")
-                and len(SPECKLE_DATA["features"]) > 0
-                and not hasattr(SPECKLE_DATA["features"][0], "properties")
-            )
-            # or SPECKLE_DATA != self.data
+        if self.data != self.url.split("&")[0] or (
+            isinstance(self.speckle_data, dict)
+            and hasattr(self.speckle_data, "features")
+            and len(self.speckle_data["features"]) > 0
+            and not hasattr(self.speckle_data["features"][0], "properties")
         ):
-            self.data = self.load_speckle_data()
-            SPECKLE_DATA = self.data
+            self.speckle_data = self.load_speckle_data()
             self.fields = self.get_fields()
 
-        data = SPECKLE_DATA
+        data = self.speckle_data
 
         # filter by properties if set
         if properties:
@@ -202,7 +189,7 @@ class SpeckleProvider(BaseProvider):
             try:
                 i["properties"]
             except:
-                SPECKLE_DATA = None
+                self.speckle_data = None
                 return self._load()
 
             if "id" not in i and self.id_field in i["properties"]:
@@ -434,7 +421,7 @@ class SpeckleProvider(BaseProvider):
                 "wkt": wkt,
                 "offset_x": 0,
                 "offset_y": 0,
-                "rotation": self.north,
+                "rotation": self.north_degrees,
                 "units_native": displayUnits,
             }
 
