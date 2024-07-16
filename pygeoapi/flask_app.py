@@ -155,7 +155,7 @@ def execute_from_flask(
 
     :returns: A Response instance
     """
-    CONFIG = get_config(request=request)
+
     api_request = APIRequest.from_flask(request, api_.locales)
 
     content: Union[str, bytes]

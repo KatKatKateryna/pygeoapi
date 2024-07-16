@@ -37,12 +37,14 @@ import logging
 import os
 import yaml
 
+from flask import Request
+
 from pygeoapi.util import to_json, yaml_load, THISDIR
 
 LOGGER = logging.getLogger(__name__)
 
 
-def get_config(raw: bool = False, request: str = None) -> dict:
+def get_config(raw: bool = False, request: Request = None) -> dict:
     """
     Get pygeoapi configurations
 
@@ -50,8 +52,11 @@ def get_config(raw: bool = False, request: str = None) -> dict:
 
     :returns: `dict` of pygeoapi configuration
     """
-    # if request is None:
-    #    raise Exception("null request")
+    speckle_url = ""
+
+    if request is not None:
+        speckle_url = request.url.split("?speckleModel=")[-1]
+
     if not os.environ.get("PYGEOAPI_CONFIG"):
         raise RuntimeError("PYGEOAPI_CONFIG environment variable not set")
 
@@ -68,6 +73,10 @@ def get_config(raw: bool = False, request: str = None) -> dict:
     speckle_collection_pts["title"]["en"] = "Some Points"
     speckle_collection_lines["title"]["en"] = "Some Lines"
     speckle_collection_polygons["title"]["en"] = "Some Polygons"
+
+    speckle_collection_pts["providers"][0]["data"] = speckle_url
+    speckle_collection_lines["providers"][0]["data"] = speckle_url
+    speckle_collection_polygons["providers"][0]["data"] = speckle_url
 
     populate_speckle_collection(speckle_collection_pts, "Points")
     populate_speckle_collection(speckle_collection_lines, "Lines")
