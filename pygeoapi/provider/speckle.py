@@ -147,19 +147,21 @@ class SpeckleProvider(BaseProvider):
 
         # only perform heavy operations once
         global SPECKLE_DATA
-        if "speckleModel=" in self.data:
-            self.data = self.data.split("speckleModel=")[-1].split(";")[0]
+        if "projects" in self.data and "models" in self.data:
+            self.data = self.data.split("?")[-1].split("&")[-1].split(";")[0]
 
         # ridiculous check, in case features are saved as ["@id"] something
+        r"""
         if SPECKLE_DATA is None or (
             isinstance(SPECKLE_DATA, dict)
             and hasattr(SPECKLE_DATA, "features")
             and len(SPECKLE_DATA["features"]) > 0
             and not hasattr(SPECKLE_DATA["features"][0], "properties")
         ):
-            self.data = self.load_speckle_data()
-            SPECKLE_DATA = self.data
-            self.fields = self.get_fields()
+        """
+        self.data = self.load_speckle_data()
+        SPECKLE_DATA = self.data
+        self.fields = self.get_fields()
 
         data = SPECKLE_DATA
 

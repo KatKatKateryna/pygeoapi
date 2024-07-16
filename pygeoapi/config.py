@@ -62,11 +62,11 @@ def get_config(raw: bool = False, request: Request = None) -> dict:
         else:
             CONFIG = yaml_load(fh)
 
-    # passed url: http://localhost:5000/?speckleModel=https://app.speckle.systems/projects/55a29f3e9d/models/2d497a381d
+    # passed url: http://localhost:5000/?limit=1000&https://app.speckle.systems/projects/55a29f3e9d/models/2d497a381d
     speckle_url = ""
 
     if request is not None:
-        url = request.url.split("?speckleModel=")[-1]
+        url = request.url.split("?")[-1]
         if "projects" in url and "models" in url:
             speckle_url = url
 
