@@ -52,10 +52,12 @@ def get_config(raw: bool = False, request: Request = None) -> dict:
 
     :returns: `dict` of pygeoapi configuration
     """
+    # passed url: http://localhost:5000/?speckleModel=https://app.speckle.systems/projects/55a29f3e9d/models/2d497a381d
     speckle_url = ""
 
     if request is not None:
         speckle_url = request.url.split("?speckleModel=")[-1]
+        # raise Exception(speckle_url)
 
     if not os.environ.get("PYGEOAPI_CONFIG"):
         raise RuntimeError("PYGEOAPI_CONFIG environment variable not set")
@@ -66,27 +68,29 @@ def get_config(raw: bool = False, request: Request = None) -> dict:
         else:
             CONFIG = yaml_load(fh)
 
-    speckle_collection_pts = copy.deepcopy(CONFIG["resources"]["speckle"])
-    speckle_collection_lines = copy.deepcopy(CONFIG["resources"]["speckle"])
-    speckle_collection_polygons = copy.deepcopy(CONFIG["resources"]["speckle"])
+    if speckle_url != "":
 
-    speckle_collection_pts["title"]["en"] = "Some Points"
-    speckle_collection_lines["title"]["en"] = "Some Lines"
-    speckle_collection_polygons["title"]["en"] = "Some Polygons"
+        speckle_collection_pts = copy.deepcopy(CONFIG["resources"]["speckle"])
+        speckle_collection_lines = copy.deepcopy(CONFIG["resources"]["speckle"])
+        speckle_collection_polygons = copy.deepcopy(CONFIG["resources"]["speckle"])
 
-    speckle_collection_pts["providers"][0]["data"] = speckle_url
-    speckle_collection_lines["providers"][0]["data"] = speckle_url
-    speckle_collection_polygons["providers"][0]["data"] = speckle_url
+        speckle_collection_pts["title"]["en"] = "Some Points"
+        speckle_collection_lines["title"]["en"] = "Some Lines"
+        speckle_collection_polygons["title"]["en"] = "Some Polygons"
 
-    populate_speckle_collection(speckle_collection_pts, "Points")
-    populate_speckle_collection(speckle_collection_lines, "Lines")
-    populate_speckle_collection(speckle_collection_polygons, "Polygons")
+        speckle_collection_pts["providers"][0]["data"] = speckle_url
+        speckle_collection_lines["providers"][0]["data"] = speckle_url
+        speckle_collection_polygons["providers"][0]["data"] = speckle_url
 
-    CONFIG["resources"] = {
-        "speckle_points": speckle_collection_pts,
-        "speckle_lines": speckle_collection_lines,
-        "speckle_polygons": speckle_collection_polygons,
-    }
+        populate_speckle_collection(speckle_collection_pts, "Points")
+        populate_speckle_collection(speckle_collection_lines, "Lines")
+        populate_speckle_collection(speckle_collection_polygons, "Polygons")
+
+        CONFIG["resources"] = {
+            "speckle_points": speckle_collection_pts,
+            "speckle_lines": speckle_collection_lines,
+            "speckle_polygons": speckle_collection_polygons,
+        }
     return CONFIG
 
 
