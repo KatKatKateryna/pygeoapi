@@ -302,7 +302,7 @@ def get_collection_items(
 
     LOGGER.debug("Processing limit parameter")
     try:
-        limit = 20000  # int(request.params.get('limit'))
+        limit = 1000000  # int(request.params.get('limit'))
         # TODO: We should do more validation, against the min and max
         #       allowed by the server configuration
         if limit <= 0:
