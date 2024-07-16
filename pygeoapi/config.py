@@ -29,7 +29,7 @@
 #
 # =================================================================
 
-from copy import copy
+import copy
 import click
 import json
 from jsonschema import validate as jsonschema_validate
@@ -42,7 +42,7 @@ from pygeoapi.util import to_json, yaml_load, THISDIR
 LOGGER = logging.getLogger(__name__)
 
 
-def get_config(raw: bool = False) -> dict:
+def get_config(raw: bool = False, request: str = None) -> dict:
     """
     Get pygeoapi configurations
 
@@ -50,7 +50,8 @@ def get_config(raw: bool = False) -> dict:
 
     :returns: `dict` of pygeoapi configuration
     """
-
+    # if request is None:
+    #    raise Exception("null request")
     if not os.environ.get("PYGEOAPI_CONFIG"):
         raise RuntimeError("PYGEOAPI_CONFIG environment variable not set")
 
