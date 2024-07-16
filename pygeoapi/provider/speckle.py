@@ -161,8 +161,30 @@ class SpeckleProvider(BaseProvider):
                 elif "northDegrees=" in item:
                     self.north_degrees = float(item.split("northDegrees=")[1])
 
-        # ridiculous check, in case features are saved as ["@id"] something
-        if self.data != self.url.split("&")[0] or (
+        # check if it's a new request (self.data was updated)
+        new_request = True
+        new_url = ""
+        new_lat = new_lon = new_north = 0
+
+        for item in self.data.split("&"):
+            if "https://" in item:
+                new_url = item
+            elif "lat=" in item:
+                new_lat = float(item.split("lat=")[1])
+            elif "lon=" in item:
+                new_lon = float(item.split("lon=")[1])
+            elif "northDegrees=" in item:
+                new_north = float(item.split("northDegrees=")[1])
+        if (
+            new_url == self.url
+            and new_lat == self.lat
+            and new_lon == self.lon
+            and new_north == self.north_degrees
+        ):
+            new_request = False
+
+        # check if self.data was updated OR if features were not created yet
+        if new_request is True or (
             isinstance(self.speckle_data, dict)
             and hasattr(self.speckle_data, "features")
             and len(self.speckle_data["features"]) > 0
