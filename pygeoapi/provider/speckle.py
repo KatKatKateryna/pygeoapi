@@ -40,6 +40,33 @@ import uuid
 from pygeoapi.provider.base import BaseProvider, ProviderItemNotFoundError
 from pygeoapi.util import crs_transform
 
+import specklepy
+from specklepy import objects
+from specklepy.core.api.credentials import (
+    get_default_account,
+    get_local_accounts,
+)
+from specklepy.transports.server import ServerTransport
+from specklepy.core.api.credentials import Account
+from specklepy.core.api.credentials import ServerInfo
+from specklepy.core.helpers import speckle_path_provider
+from specklepy.logging.exceptions import SpeckleException
+from specklepy.transports.sqlite import SQLiteTransport
+from specklepy.core.api.client import SpeckleClient
+from specklepy.core.api.models import Stream, Branch, Commit
+from specklepy.objects import Base
+from specklepy.objects.other import Collection
+from specklepy.objects.geometry import Point, Line, Polyline, Curve, Mesh, Brep
+from specklepy.objects.GIS.geometry import GisPolygonElement
+from specklepy.objects.graph_traversal.traversal import (
+    GraphTraversal,
+    TraversalRule,
+)
+from specklepy.core.api import operations
+from specklepy.core.api.wrapper import StreamWrapper
+from specklepy.objects.units import get_scale_factor_from_string
+
+
 LOGGER = logging.getLogger(__name__)
 _user_data_env_var = "SPECKLE_USERDATA_PATH"
 _application_name = "Speckle"
@@ -150,6 +177,8 @@ class SpeckleProvider(BaseProvider):
 
         # only perform heavy operations once
         global SPECKLE_DATA
+        if "speckleModel=" in self.data:
+            self.data = self.data.split("speckleModel=")[-1].split(";")[0]
 
         # ridiculous check, in case features are saved as ["@id"] something
         if SPECKLE_DATA is None or (
@@ -324,10 +353,6 @@ class SpeckleProvider(BaseProvider):
 
     def load_speckle_data(self: str):
 
-        from specklepy import operations
-        from specklepy import StreamWrapper
-        from specklepy import SpeckleException
-
         wrapper: StreamWrapper = StreamWrapper(self.data)
         client, stream = self.tryGetClient(wrapper)
         stream = self.validateStream(stream)
@@ -364,11 +389,11 @@ class SpeckleProvider(BaseProvider):
 
     def traverse_data(self, commit_obj):
 
-        from specklepy import Point, Line, Polyline, Curve, Mesh, Brep
-        from specklepy import GisPolygonElement
-        from specklepy import GraphTraversal, TraversalRule
-
-        supported_types = [Point, Line, Polyline, Curve, GisPolygonElement, Mesh, Brep]
+        supported_types = [
+            GisPolygonElement,
+            Mesh,
+            Brep,
+        ]  # Point, Line, Polyline, Curve,
         # traverse commit
         data: Dict[str, Any] = {
             "type": "FeatureCollection",
@@ -405,13 +430,24 @@ class SpeckleProvider(BaseProvider):
         # if crs not found, generate one
         lat = 51.52486388756923  # 51.52639857808991
         lon = 0.1621445437168942  # 0.15602138593951376
+        north = 0
+
+        if ";" in SPECKLE_DATA:
+            lat_lon = SPECKLE_DATA.split(";")[-1]
+            if "lat=" in lat_lon and "lon=" in lat_lon:
+                lat = float(lat_lon.split("lat=")[-1].split(";")[0])
+                lon = float(lat_lon.split("lon=")[-1].split(";")[0])
+
+                if "north=" in lat_lon:
+                    north = float(lat_lon.split("north=")[-1].split(";")[0])
+
         if crs is None:
             wkt = f'PROJCS["SpeckleCRS_latlon_{lat}_{lon}", GEOGCS["GCS_WGS_1984", DATUM["D_WGS_1984", SPHEROID["WGS_1984", 6378137.0, 298.257223563]], PRIMEM["Greenwich", 0.0], UNIT["Degree", 0.0174532925199433]], PROJECTION["Transverse_Mercator"], PARAMETER["False_Easting", 0.0], PARAMETER["False_Northing", 0.0], PARAMETER["Central_Meridian", {lon}], PARAMETER["Scale_Factor", 1.0], PARAMETER["Latitude_Of_Origin", {lat}], UNIT["Meter", 1.0]]'
             crs = {
                 "wkt": wkt,
                 "offset_x": 0,
                 "offset_y": 0,
-                "rotation": 0,
+                "rotation": north,
                 "units_native": displayUnits,
             }
 
@@ -448,14 +484,9 @@ class SpeckleProvider(BaseProvider):
                 self.assign_props(f_base, feature["properties"])
                 data["features"].append(feature)
 
-                # raise Exception(feature)
-
         return data
 
     def assign_geometry(self, crs, geometry: Dict, f_base):
-
-        from specklepy import Point, Line, Polyline, Curve, Mesh, Brep
-        from specklepy import GisPolygonElement
 
         if isinstance(f_base, Point):
             geometry["type"] = "Point"
@@ -585,7 +616,6 @@ class SpeckleProvider(BaseProvider):
         return [[pt[0], pt[1]] for pt in transformer.itransform(coords_offset)]
 
     def offset_rotate(self, crs, coords_in: List[list]):
-        from specklepy import get_scale_factor_from_string
 
         scale_factor = 1
         if isinstance(crs["units_native"], str):
@@ -625,7 +655,6 @@ class SpeckleProvider(BaseProvider):
         data["crs"] = crs
 
     def assign_props(self, obj, props):
-        from specklepy import Base
 
         for prop_name in obj.get_member_names():
             value = getattr(obj, prop_name)
@@ -661,12 +690,6 @@ class SpeckleProvider(BaseProvider):
         sw: "StreamWrapper",
     ) -> Tuple[Union["SpeckleClient", None], Union["Stream", None]]:
 
-        # from specklepy.core.api.credentials import get_local_accounts
-        from specklepy import SpeckleClient
-        from specklepy import Stream, Branch, Commit
-        from specklepy import SpeckleException
-        from specklepy import get_local_accounts
-
         # only streams with write access
         client = None
         for acc in get_local_accounts():
@@ -697,9 +720,6 @@ class SpeckleProvider(BaseProvider):
 
     def validateStream(self, stream: "Stream") -> Union["Stream", None]:
 
-        from specklepy import SpeckleException
-        from specklepy import Stream, Branch, Commit
-
         if isinstance(stream, SpeckleException):
             raise stream
         if stream["branches"] is None:
@@ -709,9 +729,6 @@ class SpeckleProvider(BaseProvider):
     def validateBranch(
         self, stream: "Stream", branchName: str
     ) -> Union["Branch", None]:
-
-        from specklepy import SpeckleException
-        from specklepy import Stream, Branch, Commit
 
         branch = None
         if not stream["branches"] or not stream["branches"]["items"]:
@@ -729,9 +746,6 @@ class SpeckleProvider(BaseProvider):
         return branch
 
     def validateCommit(self, branch: "Branch", commitId: str) -> Union["Commit", None]:
-
-        from specklepy import SpeckleException
-        from specklepy import Stream, Branch, Commit
 
         commit = None
         try:
@@ -758,9 +772,6 @@ class SpeckleProvider(BaseProvider):
     def validateTransport(
         self, client: "SpeckleClient", streamId: str
     ) -> Union["ServerTransport", None]:
-
-        from specklepy import get_default_account
-        from specklepy import ServerTransport
 
         account = client.account
         if not account.token:
