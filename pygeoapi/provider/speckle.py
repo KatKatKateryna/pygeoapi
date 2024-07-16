@@ -115,6 +115,10 @@ class SpeckleProvider(BaseProvider):
         # not a great solution, but all other functions will rely on self.data
         # self.data = self.load_speckle_data()
         # self.fields = self.get_fields()
+        self.url = self.data
+        self.lat = 51.52486388756923
+        self.lon = 0.1621445437168942
+        self.north = 0
 
     def get_fields(self):
         """
@@ -147,12 +151,22 @@ class SpeckleProvider(BaseProvider):
 
         # only perform heavy operations once
         global SPECKLE_DATA
-        if "projects" in self.data and "models" in self.data:
+
+        if (
+            isinstance(self.data, str)
+            and "projects" in self.data
+            and "models" in self.data
+        ):
             request_str = self.data.split("?")[-1]
             for item in request_str.split("&"):
                 if "https://" in item:
-                    self.data = item + "&" + request_str.split("item")[-1]
-                    break
+                    self.url = item
+                elif "lat=" in item:
+                    self.lat = float(item.split("lat=")[1])
+                elif "lon=" in item:
+                    self.lon = float(item.split("lon=")[1])
+                elif "north=" in item:
+                    self.north = float(item.split("north=")[1])
 
         # ridiculous check, in case features are saved as ["@id"] something
 
@@ -336,7 +350,7 @@ class SpeckleProvider(BaseProvider):
         from specklepy.core.api import operations
         from specklepy.core.api.wrapper import StreamWrapper
 
-        wrapper: StreamWrapper = StreamWrapper(self.data.split("&")[0])
+        wrapper: StreamWrapper = StreamWrapper(self.url.split("&")[0])
         client, stream = self.tryGetClient(wrapper)
         stream = self.validateStream(stream)
         branchName = wrapper.branch_name
@@ -414,28 +428,13 @@ class SpeckleProvider(BaseProvider):
                 displayUnits = item.current.units
 
         # if crs not found, generate one
-        lat = 51.52486388756923  # 51.52639857808991
-        lon = 0.1621445437168942  # 0.15602138593951376
-        north = 0
-
-        if isinstance(SPECKLE_DATA, str) and "&lat=&" in SPECKLE_DATA:
-            lat_lon_north = SPECKLE_DATA.split("&", 1)[-1]
-
-            raise Exception(lat_lon_north)
-            if "lat=" in lat_lon_north and "lon=" in lat_lon_north:
-                lat = float(lat_lon_north.split("lat=")[-1].split("&")[0])
-                lon = float(lat_lon_north.split("lon=")[-1].split("&")[0])
-
-                if "north=" in lat_lon_north:
-                    north = float(lat_lon_north.split("north=")[-1].split("&")[0])
-
         if crs is None:
-            wkt = f'PROJCS["SpeckleCRS_latlon_{lat}_{lon}", GEOGCS["GCS_WGS_1984", DATUM["D_WGS_1984", SPHEROID["WGS_1984", 6378137.0, 298.257223563]], PRIMEM["Greenwich", 0.0], UNIT["Degree", 0.0174532925199433]], PROJECTION["Transverse_Mercator"], PARAMETER["False_Easting", 0.0], PARAMETER["False_Northing", 0.0], PARAMETER["Central_Meridian", {lon}], PARAMETER["Scale_Factor", 1.0], PARAMETER["Latitude_Of_Origin", {lat}], UNIT["Meter", 1.0]]'
+            wkt = f'PROJCS["SpeckleCRS_latlon_{self.lat}_{self.lon}", GEOGCS["GCS_WGS_1984", DATUM["D_WGS_1984", SPHEROID["WGS_1984", 6378137.0, 298.257223563]], PRIMEM["Greenwich", 0.0], UNIT["Degree", 0.0174532925199433]], PROJECTION["Transverse_Mercator"], PARAMETER["False_Easting", 0.0], PARAMETER["False_Northing", 0.0], PARAMETER["Central_Meridian", {self.lon}], PARAMETER["Scale_Factor", 1.0], PARAMETER["Latitude_Of_Origin", {self.lat}], UNIT["Meter", 1.0]]'
             crs = {
                 "wkt": wkt,
                 "offset_x": 0,
                 "offset_y": 0,
-                "rotation": north,
+                "rotation": self.north,
                 "units_native": displayUnits,
             }
 
