@@ -744,86 +744,71 @@ class API:
 
         LOGGER.debug("Creating links")
         # TODO: put title text in config or translatable files?
-        fcm["links"] = [
-            {
-                "rel": request.get_linkrel(F_JSON),
-                "type": FORMAT_TYPES[F_JSON],
-                "title": l10n.translate("This document as JSON", request.locale),
-                "href": f"{self.base_url}?f={F_JSON}",
-            },
-            {
-                "rel": request.get_linkrel(F_JSONLD),
-                "type": FORMAT_TYPES[F_JSONLD],
-                "title": l10n.translate(
-                    "This document as RDF (JSON-LD)", request.locale
-                ),  # noqa
-                "href": f"{self.base_url}?f={F_JSONLD}",
-            },
-            {
-                "rel": request.get_linkrel(F_HTML),
-                "type": FORMAT_TYPES[F_HTML],
-                "title": l10n.translate("This document as HTML", request.locale),
-                "href": f"{self.base_url}?f={F_HTML}",
-                "hreflang": self.default_locale,
-            },
-            {
-                "rel": "service-desc",
-                "type": "application/vnd.oai.openapi+json;version=3.0",
-                "title": l10n.translate(
-                    "The OpenAPI definition as JSON", request.locale
-                ),  # noqa
-                "href": f"{self.base_url}/openapi",
-            },
-            {
-                "rel": "service-doc",
-                "type": FORMAT_TYPES[F_HTML],
-                "title": l10n.translate(
-                    "The OpenAPI definition as HTML", request.locale
-                ),  # noqa
-                "href": f"{self.base_url}/openapi?f={F_HTML}",
-                "hreflang": self.default_locale,
-            },
-            {
-                "rel": "conformance",
-                "type": FORMAT_TYPES[F_JSON],
-                "title": l10n.translate("Conformance", request.locale),
-                "href": f"{self.base_url}/conformance",
-            },
-            {
-                "rel": "data",
-                "type": FORMAT_TYPES[F_JSON],
-                "title": l10n.translate("Collections", request.locale),
-                "href": self.get_collections_url(),
-            },
-            {
-                "rel": "http://www.opengis.net/def/rel/ogc/1.0/processes",
-                "type": FORMAT_TYPES[F_JSON],
-                "title": l10n.translate("Processes", request.locale),
-                "href": f"{self.base_url}/processes",
-            },
-            {
-                "rel": "http://www.opengis.net/def/rel/ogc/1.0/job-list",
-                "type": FORMAT_TYPES[F_JSON],
-                "title": l10n.translate("Jobs", request.locale),
-                "href": f"{self.base_url}/jobs",
-            },
-            {
-                "rel": "http://www.opengis.net/def/rel/ogc/1.0/tiling-schemes",
-                "type": FORMAT_TYPES[F_JSON],
-                "title": l10n.translate(
-                    "The list of supported tiling schemes as JSON", request.locale
-                ),  # noqa
-                "href": f"{self.base_url}/TileMatrixSets?f=json",
-            },
-            {
-                "rel": "http://www.opengis.net/def/rel/ogc/1.0/tiling-schemes",
-                "type": FORMAT_TYPES[F_HTML],
-                "title": l10n.translate(
-                    "The list of supported tiling schemes as HTML", request.locale
-                ),  # noqa
-                "href": f"{self.base_url}/TileMatrixSets?f=html",
-            },
-        ]
+        fcm['links'] = [{
+            'rel': 'about',
+            'type': 'text/html',
+            'title': l10n.translate(
+                self.config['metadata']['identification']['title'],
+                request.locale),
+            'href': self.config['metadata']['identification']['url']
+        }, {
+            'rel': request.get_linkrel(F_JSON),
+            'type': FORMAT_TYPES[F_JSON],
+            'title': l10n.translate('This document as JSON', request.locale),
+            'href': f"{self.base_url}?f={F_JSON}"
+        }, {
+            'rel': request.get_linkrel(F_JSONLD),
+            'type': FORMAT_TYPES[F_JSONLD],
+            'title': l10n.translate('This document as RDF (JSON-LD)', request.locale),  # noqa
+            'href': f"{self.base_url}?f={F_JSONLD}"
+        }, {
+            'rel': request.get_linkrel(F_HTML),
+            'type': FORMAT_TYPES[F_HTML],
+            'title': l10n.translate('This document as HTML', request.locale),
+            'href': f"{self.base_url}?f={F_HTML}",
+            'hreflang': self.default_locale
+        }, {
+            'rel': 'service-desc',
+            'type': 'application/vnd.oai.openapi+json;version=3.0',
+            'title': l10n.translate('The OpenAPI definition as JSON', request.locale),  # noqa
+            'href': f"{self.base_url}/openapi"
+        }, {
+            'rel': 'service-doc',
+            'type': FORMAT_TYPES[F_HTML],
+            'title': l10n.translate('The OpenAPI definition as HTML', request.locale),  # noqa
+            'href': f"{self.base_url}/openapi?f={F_HTML}",
+            'hreflang': self.default_locale
+        }, {
+            'rel': 'conformance',
+            'type': FORMAT_TYPES[F_JSON],
+            'title': l10n.translate('Conformance', request.locale),
+            'href': f"{self.base_url}/conformance"
+        }, {
+            'rel': 'data',
+            'type': FORMAT_TYPES[F_JSON],
+            'title': l10n.translate('Collections', request.locale),
+            'href': self.get_collections_url()
+        }, {
+            'rel': 'http://www.opengis.net/def/rel/ogc/1.0/processes',
+            'type': FORMAT_TYPES[F_JSON],
+            'title': l10n.translate('Processes', request.locale),
+            'href': f"{self.base_url}/processes"
+        }, {
+            'rel': 'http://www.opengis.net/def/rel/ogc/1.0/job-list',
+            'type': FORMAT_TYPES[F_JSON],
+            'title': l10n.translate('Jobs', request.locale),
+            'href': f"{self.base_url}/jobs"
+        }, {
+            'rel': 'http://www.opengis.net/def/rel/ogc/1.0/tiling-schemes',
+            'type': FORMAT_TYPES[F_JSON],
+            'title': l10n.translate('The list of supported tiling schemes as JSON', request.locale),  # noqa
+            'href': f"{self.base_url}/TileMatrixSets?f=json"
+        }, {
+            'rel': 'http://www.opengis.net/def/rel/ogc/1.0/tiling-schemes',
+            'type': FORMAT_TYPES[F_HTML],
+            'title': l10n.translate('The list of supported tiling schemes as HTML', request.locale),  # noqa
+            'href': f"{self.base_url}/TileMatrixSets?f=html"
+        }]
 
         headers = request.get_response_headers(**self.api_headers)
         if request.format == F_HTML:  # render
