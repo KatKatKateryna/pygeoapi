@@ -5,10 +5,10 @@
 #          Krishna Lodha <krishnaglodha@gmail.com>
 #          Tom Kralidis <tomkralidis@gmail.com>
 #
-# Copyright (c) 2025 Francesco Bartoli
+# Copyright (c) 2022 Francesco Bartoli
 # Copyright (c) 2022 Luca Delucchi
 # Copyright (c) 2022 Krishna Lodha
-# Copyright (c) 2025 Tom Kralidis
+# Copyright (c) 2024 Tom Kralidis
 #
 # Permission is hereby granted, free of charge, to any person
 # obtaining a copy of this software and associated documentation
@@ -191,16 +191,6 @@ urlpatterns = [
         'collections/<str:collection_id>/locations',
         views.get_collection_edr_query,
         name='collection-edr-corridor',
-    ),
-    path(
-        'collections/<str:collection_id>/instances/<str:instance_id>',
-        views.get_collection_edr_query,
-        name='collection-edr-instance',
-    ),
-    path(
-        'collections/<str:collection_id>/instances',
-        views.get_collection_edr_query,
-        name='collection-edr-instances',
     ),
     path(
         'collections/<str:collection_id>/instances/<str:instance_id>/position',

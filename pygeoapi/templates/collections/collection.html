@@ -125,7 +125,7 @@
       <h3>{% trans %}Storage CRS{% endtrans %}</h3>
       <ul>
           <li>
-            {% trans %}CRS{% endtrans %}: <a title="{{ data['storageCrs'] }}" href="{{ data['storageCrs'] }}"><span>{{ data['storageCrs'] }}</span></a>
+            {% trans %}CRS{% endtrans %}: <a title="{{ data['storageCRS'] }}" href="{{ data['storageCRS'] }}"><span>{{ data['storageCRS'] }}</span></a>
           </li>
         <li>
           {% trans %}Epoch{% endtrans %}: <span>{{ data['storageCrsCoordinateEpoch'] or '_(not specified)' }}</span></a>
@@ -148,8 +148,8 @@
 
    {# if this collection has a map representation, add it to the map #}
    {% for link in data['links'] %}
-      {% if link['rel'] == 'http://www.opengis.net/def/rel/ogc/1.0/map' and link['href'] %}
-        L.tileLayer.wms("{{ link['href'] }}", {"opacity": .7, "transparent": true, "crs": L.CRS.EPSG4326}).addTo(map);
+      {% if link['rel'] == 'http://www.opengis.net/def/rel/ogc/1.0/map' and link['href'] %} 
+        L.tileLayer.wms("{{ link['href'] }}", {"opacity": .7, "transparent": true, "crs": L.CRS.EPSG4326}).addTo(map); 
       {% endif %}
     {% endfor %}
 
@@ -162,7 +162,7 @@
     ]);
 
     map.addLayer(bbox_layer);
-    map.fitBounds(bbox_layer.getBounds(), {maxZoom: 10});
+    map.fitBounds(bbox_layer.getBounds(), {maxZoom: 22});
 
     // Allow to get bbox query parameter of a rectangular area specified by
     // dragging the mouse while pressing the Ctrl key

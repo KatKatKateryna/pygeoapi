@@ -91,3 +91,4 @@ GRANT SELECT ON TABLE public.foo TO replicator;
 --
 -- PostgreSQL database dump complete
 --
+

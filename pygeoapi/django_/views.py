@@ -5,10 +5,10 @@
 #          Krishna Lodha <krishnaglodha@gmail.com>
 #          Tom Kralidis <tomkralidis@gmail.com>
 #
-# Copyright (c) 2025 Francesco Bartoli
+# Copyright (c) 2022 Francesco Bartoli
 # Copyright (c) 2022 Luca Delucchi
 # Copyright (c) 2022 Krishna Lodha
-# Copyright (c) 2025 Tom Kralidis
+# Copyright (c) 2024 Tom Kralidis
 #
 # Permission is hereby granted, free of charge, to any person
 # obtaining a copy of this software and associated documentation
@@ -35,13 +35,12 @@
 
 """Integration module for Django"""
 
-from typing import Optional, Union
+from typing import Tuple, Dict, Mapping, Optional, Union
 
 from django.conf import settings
 from django.http import HttpRequest, HttpResponse
 
 from pygeoapi.api import API, APIRequest, apply_gzip
-import pygeoapi.api as core_api
 import pygeoapi.api.coverages as coverages_api
 import pygeoapi.api.environmental_data_retrieval as edr_api
 import pygeoapi.api.itemtypes as itemtypes_api
@@ -49,9 +48,6 @@ import pygeoapi.api.maps as maps_api
 import pygeoapi.api.processes as processes_api
 import pygeoapi.api.stac as stac_api
 import pygeoapi.api.tiles as tiles_api
-
-if settings.PYGEOAPI_CONFIG['server'].get('admin'):
-    import pygeoapi.admin as admin_api
 
 
 def landing_page(request: HttpRequest) -> HttpResponse:
@@ -63,7 +59,10 @@ def landing_page(request: HttpRequest) -> HttpResponse:
     :returns: Django HTTP Response
     """
 
-    return execute_from_django(core_api.landing_page, request)
+    response_ = _feed_response(request, 'landing_page')
+    response = _to_django_response(*response_)
+
+    return response
 
 
 def openapi(request: HttpRequest) -> HttpResponse:
@@ -75,7 +74,10 @@ def openapi(request: HttpRequest) -> HttpResponse:
     :returns: Django HTTP Response
     """
 
-    return execute_from_django(core_api.openapi_, request)
+    response_ = _feed_response(request, 'openapi_')
+    response = _to_django_response(*response_)
+
+    return response
 
 
 def conformance(request: HttpRequest) -> HttpResponse:
@@ -86,7 +88,11 @@ def conformance(request: HttpRequest) -> HttpResponse:
 
     :returns: Django HTTP Response
     """
-    return execute_from_django(core_api.conformance, request)
+
+    response_ = _feed_response(request, 'conformance')
+    response = _to_django_response(*response_)
+
+    return response
 
 
 def tilematrixsets(request: HttpRequest,
@@ -120,8 +126,9 @@ def collections(request: HttpRequest,
     :returns: Django HTTP Response
     """
 
-    return execute_from_django(core_api.describe_collections, request,
-                               collection_id)
+    response_ = _feed_response(request, 'describe_collections', collection_id)
+
+    return _to_django_response(*response_)
 
 
 def collection_schema(request: HttpRequest,
@@ -135,7 +142,7 @@ def collection_schema(request: HttpRequest,
     :returns: Django HTTP Response
     """
 
-    return execute_from_django(core_api.get_collection_schema, request,
+    return execute_from_django(itemtypes_api.get_collection_schema, request,
                                collection_id)
 
 
@@ -180,7 +187,7 @@ def collection_items(request: HttpRequest, collection_id: str) -> HttpResponse:
                     'create', collection_id, skip_valid_check=True)
             else:
                 response_ = execute_from_django(
-                    itemtypes_api.get_collection_items,
+                    itemtypes_api.post_collection_items,
                     request, collection_id, skip_valid_check=True,)
     elif request.method == 'OPTIONS':
         response_ = execute_from_django(itemtypes_api.manage_collection_item,
@@ -428,14 +435,6 @@ def get_collection_edr_query(
     :returns: Django HTTP response
     """
 
-    if (request.path.endswith('instances') or
-            (instance_id is not None and
-             request.path.endswith(instance_id))):
-        return execute_from_django(
-            edr_api.get_collection_edr_instances, request, collection_id,
-            instance_id
-        )
-
     if location_id:
         query_type = 'locations'
     else:
@@ -485,13 +484,13 @@ def admin_config(request: HttpRequest) -> HttpResponse:
     """
 
     if request.method == 'GET':
-        return execute_from_django(admin_api.get_config_, request)
+        return _feed_response(request, 'get_admin_config')
 
     elif request.method == 'PUT':
-        return execute_from_django(admin_api.put_config, request)
+        return _feed_response(request, 'put_admin_config')
 
     elif request.method == 'PATCH':
-        return execute_from_django(admin_api.patch_config, request)
+        return _feed_response(request, 'patch_admin_config')
 
 
 def admin_config_resources(request: HttpRequest) -> HttpResponse:
@@ -502,10 +501,10 @@ def admin_config_resources(request: HttpRequest) -> HttpResponse:
     """
 
     if request.method == 'GET':
-        return execute_from_django(admin_api.get_resources, request)
+        return _feed_response(request, 'get_admin_config_resources')
 
     elif request.method == 'POST':
-        return execute_from_django(admin_api.put_resource, request)
+        return _feed_response(request, 'put_admin_config_resources')
 
 
 def admin_config_resource(request: HttpRequest,
@@ -517,20 +516,36 @@ def admin_config_resource(request: HttpRequest,
     """
 
     if request.method == 'GET':
-        return execute_from_django(admin_api.get_resource, request,
-                                   resource_id)
+        return _feed_response(request, 'put_admin_config_resource',
+                              resource_id)
 
     elif request.method == 'DELETE':
-        return execute_from_django(admin_api.delete_resource, request,
-                                   resource_id)
+        return _feed_response(request, 'delete_admin_config_resource',
+                              resource_id)
 
     elif request.method == 'PUT':
-        return execute_from_django(admin_api.put_resource, request,
-                                   resource_id)
+        return _feed_response(request, 'put_admin_config_resource',
+                              resource_id)
 
     elif request.method == 'PATCH':
-        return execute_from_django(admin_api.patch_resource, request,
-                                   resource_id)
+        return _feed_response(request, 'patch_admin_config_resource',
+                              resource_id)
+
+
+# TODO: remove this when all views have been refactored
+def _feed_response(request: HttpRequest, api_definition: str,
+                   *args, **kwargs) -> Tuple[Dict, int, str]:
+    """Use pygeoapi api to process the input request"""
+
+    if 'admin' in api_definition and settings.PYGEOAPI_CONFIG['server'].get('admin'):  # noqa
+        from pygeoapi.admin import Admin
+        api_ = Admin(settings.PYGEOAPI_CONFIG, settings.OPENAPI_DOCUMENT)
+    else:
+        api_ = API(settings.PYGEOAPI_CONFIG, settings.OPENAPI_DOCUMENT)
+
+    api = getattr(api_, api_definition)
+
+    return api(request, *args, **kwargs)
 
 
 def execute_from_django(api_function, request: HttpRequest, *args,
@@ -552,8 +567,15 @@ def execute_from_django(api_function, request: HttpRequest, *args,
         headers, status, content = api_function(api_, api_request, *args)
         content = apply_gzip(headers, content)
 
-    # Convert API payload to a django response
-    response = HttpResponse(content, status=status)
+    return _to_django_response(headers, status, content)
+
+
+# TODO: inline this to execute_from_django after refactoring
+def _to_django_response(headers: Mapping, status_code: int,
+                        content: Union[str, bytes]) -> HttpResponse:
+    """Convert API payload to a django response"""
+
+    response = HttpResponse(content, status=status_code)
 
     for key, value in headers.items():
         response[key] = value

@@ -72,12 +72,9 @@ The `Xarray`_ provider plugin reads and extracts `NetCDF`_ and `Zarr`_ data.
          data: tests/data/coads_sst.nc
          # optionally specify x/y/time fields, else provider will attempt
          # to derive automagically
+         x_field: lat
          x_field: lon
-         y_field: lat
          time_field: time
-         # optionally specify the coordinate reference system of your dataset
-         # else pygeoapi assumes it is WGS84 (EPSG:4326).
-         storage_crs: 4326
          format:
             name: netcdf
             mimetype: application/x-netcdf
@@ -98,11 +95,6 @@ The `Xarray`_ provider plugin reads and extracts `NetCDF`_ and `Zarr`_ data.
    When referencing `NetCDF`_ or `Zarr`_ data stored in an S3 bucket, 
    be sure to provide the full S3 URL. Any parameters required to open the dataset
    using fsspec can be added to the config file under `options` and `s3`.
-
-.. note::
-   When providing a `storage_crs` value in the xarray configuration, specify the 
-   coordinate reference system using any valid input for 
-   `pyproj.CRS.from_user_input`_. 
 
 Data access examples
 --------------------
@@ -148,10 +140,9 @@ Data access examples
    ``.../coverage`` queries which return an alternative representation to CoverageJSON (which prompt a download)
    will have the response filename matching the collection name and appropriate file extension (e.g. ``my-dataset.nc``)
 
-.. _`OGC API - Coverages`: https://ogcapi.ogc.org/coverages
+.. _`OGC API - Coverages`: https://github.com/opengeospatial/ogcapi-coverages
 .. _`Rasterio`: https://rasterio.readthedocs.io
 .. _`Xarray`: https://docs.xarray.dev/en/stable
 .. _`NetCDF`: https://en.wikipedia.org/wiki/NetCDF
 .. _`Zarr`: https://zarr.readthedocs.io/en/stable
 .. _`GDAL raster driver short name`: https://gdal.org/drivers/raster/index.html
-.. _`pyproj.CRS.from_user_input`: https://pyproj4.github.io/pyproj/stable/api/crs/coordinate_system.html#pyproj.crs.CoordinateSystem.from_user_input

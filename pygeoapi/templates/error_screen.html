@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html>
+<body>
+
+<div id="loading_screen" style="position: absolute;left: 20px; right: 20px;top:20px;width: fit-content;margin-inline: auto;">
+{{data['exception']}}
+</div>
+
+</body>
+
+<script>
+  try {
+    document.getElementById("loading_screen").remove();
+  }
+  catch(err) {}
+</script>
+
+</html>

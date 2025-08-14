@@ -2,7 +2,7 @@
 #
 # Authors: Tom Kralidis <tomkralidis@gmail.com>
 #
-# Copyright (c) 2025 Tom Kralidis
+# Copyright (c) 2024 Tom Kralidis
 #
 # Permission is hereby granted, free of charge, to any person
 # obtaining a copy of this software and associated documentation
@@ -32,8 +32,7 @@ import shutil
 
 import pytest
 
-from pygeoapi.provider.base import (ProviderItemNotFoundError,
-                                    ProviderInvalidQueryError)
+from pygeoapi.provider.base import ProviderItemNotFoundError
 from pygeoapi.provider.tinydb_ import TinyDBProvider
 
 from .util import get_test_file_path
@@ -91,28 +90,6 @@ def config(tmp_path):
     }
 
 
-def test_domains(config):
-    p = TinyDBProvider(config)
-
-    domains, current = p.get_domains()
-
-    assert current
-
-    expected_properties = ['DATE', 'FLOW', 'FLOW_SYMBOL_EN', 'FLOW_SYMBOL_FR',
-                           'IDENTIFIER', 'LEVEL', 'PROV_TERR_STATE_LOC',
-                           'STATION_NAME', 'STATION_NUMBER']
-
-    assert sorted(domains.keys()) == expected_properties
-
-    assert len(domains['STATION_NUMBER']) == 1
-
-    domains, current = p.get_domains(['STATION_NAME'])
-
-    assert current
-
-    assert list(domains.keys()) == ['STATION_NAME']
-
-
 def test_query(config):
     p = TinyDBProvider(config)
 
@@ -130,16 +107,6 @@ def test_query(config):
     assert results['features'][0]['properties']['STATION_NUMBER'] == '02HC003'
 
     results = p.query(properties=[('FLOW', 2.039999961853028)])
-    assert len(results['features']) == 1
-    assert results['numberMatched'] == 1
-    assert results['numberReturned'] == 1
-
-    results = p.query(properties=[('STATION_NAME', 'HUMBER RIVER AT WESTON')])
-    assert len(results['features']) == 10
-    assert results['numberMatched'] == 50
-    assert results['numberReturned'] == 10
-
-    results = p.query(properties=[('IDENTIFIER', '02HC003.1975-10-03')])
     assert len(results['features']) == 1
     assert results['numberMatched'] == 1
     assert results['numberReturned'] == 1
@@ -177,13 +144,6 @@ def test_query(config):
 
     results = p.query(sortby=[{'property': 'DATE', 'order': '-'}])
     assert results['features'][0]['id'] == '02HC003.2017-05-27'
-
-
-def test_get_invalid_property(config):
-    """Testing query for an invalid property name"""
-    p = TinyDBProvider(config)
-    with pytest.raises(ProviderInvalidQueryError):
-        p.query(properties=[('\'foo', 'bar')])
 
 
 def test_get(config):

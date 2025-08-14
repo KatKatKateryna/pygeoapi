@@ -57,6 +57,7 @@ class XarrayEDRProvider(BaseEDRProvider, XarrayProvider):
         BaseEDRProvider.__init__(self, provider_def)
         XarrayProvider.__init__(self, provider_def)
 
+    @BaseEDRProvider.register()
     def position(self, **kwargs):
         """
         Extract data from collection collection
@@ -80,14 +81,14 @@ class XarrayEDRProvider(BaseEDRProvider, XarrayProvider):
         wkt = kwargs.get('wkt')
         if wkt is not None:
             LOGGER.debug('Processing WKT')
-            LOGGER.debug(f'Geometry type: {wkt.geom_type}')
-            if wkt.geom_type == 'Point':
+            LOGGER.debug(f'Geometry type: {wkt.type}')
+            if wkt.type == 'Point':
                 query_params[self._coverage_properties['x_axis_label']] = wkt.x
                 query_params[self._coverage_properties['y_axis_label']] = wkt.y
-            elif wkt.geom_type == 'LineString':
+            elif wkt.type == 'LineString':
                 query_params[self._coverage_properties['x_axis_label']] = wkt.xy[0]  # noqa
                 query_params[self._coverage_properties['y_axis_label']] = wkt.xy[1]  # noqa
-            elif wkt.geom_type == 'Polygon':
+            elif wkt.type == 'Polygon':
                 query_params[self._coverage_properties['x_axis_label']] = slice(wkt.bounds[0], wkt.bounds[2])  # noqa
                 query_params[self._coverage_properties['y_axis_label']] = slice(wkt.bounds[1], wkt.bounds[3])  # noqa
                 pass
@@ -104,18 +105,11 @@ class XarrayEDRProvider(BaseEDRProvider, XarrayProvider):
         if datetime_ is not None:
             query_params[self.time_field] = self._make_datetime(datetime_)
 
-        z = kwargs.get('z')
-        if z is not None:
-            if self.z_field is not None:
-                query_params[self.z_field] = z
-            else:
-                LOGGER.debug('No vertical level found')
-
         LOGGER.debug(f'query parameters: {query_params}')
 
         try:
             if select_properties:
-                self._fields = {k: v for k, v in self._fields.items() if k in select_properties}  # noqa
+                self.fields = {k: v for k, v in self.fields.items() if k in select_properties}  # noqa
                 data = self._data[[*select_properties]]
             else:
                 data = self._data
@@ -167,6 +161,7 @@ class XarrayEDRProvider(BaseEDRProvider, XarrayProvider):
 
         return self.gen_covjson(out_meta, data, self.fields)
 
+    @BaseEDRProvider.register()
     def cube(self, **kwargs):
         """
         Extract data from collection
@@ -211,7 +206,7 @@ class XarrayEDRProvider(BaseEDRProvider, XarrayProvider):
         LOGGER.debug(f'query parameters: {query_params}')
         try:
             if select_properties:
-                self._fields = {k: v for k, v in self._fields.items() if k in select_properties}  # noqa
+                self.fields = {k: v for k, v in self.fields.items() if k in select_properties}  # noqa
                 data = self._data[[*select_properties]]
             else:
                 data = self._data

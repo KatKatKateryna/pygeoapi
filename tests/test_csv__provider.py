@@ -2,7 +2,7 @@
 #
 # Authors: Tom Kralidis <tomkralidis@gmail.com>
 #
-# Copyright (c) 2025 Tom Kralidis
+# Copyright (c) 2021 Tom Kralidis
 #
 # Permission is hereby granted, free of charge, to any person
 # obtaining a copy of this software and associated documentation
@@ -27,21 +27,15 @@
 #
 # =================================================================
 
-import logging
-
 import pytest
 
-from pygeoapi.provider.base import (ProviderItemNotFoundError,
-                                    ProviderInvalidQueryError)
+from pygeoapi.provider.base import ProviderItemNotFoundError
 from pygeoapi.provider.csv_ import CSVProvider
 
 from .util import get_test_file_path
 
-LOGGER = logging.getLogger(__name__)
-
 path = get_test_file_path('data/obs.csv')
 stations_path = get_test_file_path('data/station_list.csv')
-malformatted_path = get_test_file_path('data/obs_malformatted.csv')
 
 
 @pytest.fixture()
@@ -68,20 +62,6 @@ def station_config():
         'geometry': {
             'x_field': 'longitude',
             'y_field': 'latitude'
-        }
-    }
-
-
-@pytest.fixture()
-def malformatted_config():
-    return {
-        'name': 'CSV',
-        'type': 'feature',
-        'data': malformatted_path,
-        'id_field': 'id',
-        'geometry': {
-            'x_field': 'long',
-            'y_field': 'lat'
         }
     }
 
@@ -136,17 +116,6 @@ def test_query(config):
     results = p.query()
     assert len(results['features'][0]['properties']) == 2
 
-    p = CSVProvider(config)
-    results = p.query(bbox=[-75, 45, -64, 55])
-    assert len(results['features'][0]['properties']) == 2
-
-
-def test_get_invalid_property(config):
-    """Testing query for an invalid property name"""
-    p = CSVProvider(config)
-    with pytest.raises(ProviderInvalidQueryError):
-        p.query(properties=[('foo', 'bar')])
-
 
 def test_get(config):
     p = CSVProvider(config)
@@ -176,17 +145,3 @@ def test_get_station(station_config):
 
     result = p.get('0-454-2-AWSNAMITAMBO')
     assert result['properties']['station_name'] == 'NAMITAMBO'
-
-
-def test_get_malformed(malformatted_config, caplog):
-    p = CSVProvider(malformatted_config)
-
-    with caplog.at_level(logging.WARNING):
-        results = p.query()
-
-    assert 'Row with invalid geometry' in caplog.text
-    assert len(results['features']) == 5
-    assert results['numberMatched'] == 5
-    assert results['numberReturned'] == 5
-    assert results['features'][3]['geometry']['coordinates'] is None
-    assert results['features'][4]['geometry']['coordinates'] is None

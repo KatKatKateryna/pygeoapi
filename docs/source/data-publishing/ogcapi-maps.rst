@@ -51,7 +51,7 @@ Currently supported style files (`options.style`):
 .. code-block:: yaml
 
    providers:
-       - type: map
+       - type: map 
          name: MapScript
          data: /path/to/data.shp
          options:
@@ -59,39 +59,8 @@ Currently supported style files (`options.style`):
              layer: foo_name
              style: ./foo.sld
          format:
-            name: png
+            name: png 
             mimetype: image/png
-
-Projections are supported through EPSG codes (`options.projection`):        
-
-.. code-block:: yaml
-
-           options:
-             type: MS_LAYER_POINT
-             layer: foo_name
-             projection: 32631
-
-This parameter is optional, defaulting to WGS84 (4236).
-
-This provider also supports `tile indexing <https://mapserver.org/optimization/tileindex.html>`_,
-which lets MapScript create a mosaic on the fly, piecing together a set of files. 
-In order to enable it, set `options.tileindex` to `True` and set the location of the index file on the `data` path.
-
-.. code-block:: yaml
-
-        providers:
-          - type: map
-            name: MapScript
-            data: /data/index.shp
-            options:
-                type: MS_LAYER_RASTER
-                tileindex: True
-                layer: index
-            format:
-                name: png
-                mimetype: image/png
-
-The `options.tileindex` parameter is optional, defaulting to `False`.
 
 WMSFacade
 ^^^^^^^^^
@@ -102,15 +71,14 @@ required.  An optional style name can be defined via `options.style`.
 .. code-block:: yaml
 
    providers:
-       - type: map
+       - type: map 
          name: WMSFacade
          data: https://demo.mapserver.org/cgi-bin/msautotest
          options:
              layer: world_latlong
              style: default
-             version: 1.3.0
          format:
-               name: png
+               name: png 
                mimetype: image/png
 
 

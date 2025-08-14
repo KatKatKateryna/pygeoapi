@@ -4,7 +4,7 @@
 #          John A Stevenson <jostev@bgs.ac.uk>
 #          Colin Blackburn <colb@bgs.ac.uk>
 #
-# Copyright (c) 2025 Tom Kralidis
+# Copyright (c) 2024 Tom Kralidis
 # Copyright (c) 2022 John A Stevenson and Colin Blackburn
 #
 # Permission is hereby granted, free of charge, to any person
@@ -62,11 +62,6 @@ def test_get_collection_queryables(config, api_):
         api_, req, 'notfound')
     assert code == HTTPStatus.NOT_FOUND
 
-    req = mock_api_request()
-    rsp_headers, code, response = get_collection_queryables(
-        api_, req, 'mapserver_world_map')
-    assert code == HTTPStatus.BAD_REQUEST
-
     req = mock_api_request({'f': 'html'})
     rsp_headers, code, response = get_collection_queryables(api_, req, 'obs')
     assert rsp_headers['Content-Type'] == FORMAT_TYPES[F_HTML]
@@ -79,14 +74,6 @@ def test_get_collection_queryables(config, api_):
     assert 'properties' in queryables
     assert len(queryables['properties']) == 5
 
-    req = mock_api_request({'f': 'json'})
-    rsp_headers, code, response = get_collection_queryables(api_, req, 'canada-metadata')  # noqa
-    assert rsp_headers['Content-Type'] == 'application/schema+json'
-    queryables = json.loads(response)
-
-    assert 'properties' in queryables
-    assert len(queryables['properties']) == 10
-
     # test with provider filtered properties
     api_.config['resources']['obs']['providers'][0]['properties'] = ['stn_id']
 
@@ -96,20 +83,10 @@ def test_get_collection_queryables(config, api_):
     assert 'properties' in queryables
     assert len(queryables['properties']) == 2
     assert 'geometry' in queryables['properties']
-    assert '$ref' not in queryables['properties']['geometry']
-    assert queryables['properties']['geometry']['format'] == 'geometry-any'
+    assert queryables['properties']['geometry']['$ref'] == 'https://geojson.org/schema/Geometry.json'  # noqa
 
     # No language requested: should be set to default from YAML
     assert rsp_headers['Content-Language'] == 'en-US'
-
-    req = mock_api_request({'f': 'json', 'profile': 'actual-domain'})
-    rsp_headers, code, response = get_collection_queryables(api_, req, 'canada-metadata')  # noqa
-    assert rsp_headers['Content-Type'] == 'application/schema+json'
-    queryables = json.loads(response)
-
-    assert 'properties' in queryables
-    assert 'enum' in queryables['properties']['title']
-    assert len(queryables['properties']['title']['enum']) == 10
 
 
 def test_get_collection_items(config, api_):
@@ -189,7 +166,7 @@ def test_get_collection_items(config, api_):
     assert len(features['features']) == 0
 
     # Invalid limit
-    req = mock_api_request({'limit': '0'})
+    req = mock_api_request({'limit': 0})
     rsp_headers, code, response = get_collection_items(api_, req, 'obs')
     features = json.loads(response)
 
@@ -209,7 +186,7 @@ def test_get_collection_items(config, api_):
     assert len(features['features']) == 1
     assert features['numberMatched'] == 1
 
-    req = mock_api_request({'limit': '2'})
+    req = mock_api_request({'limit': 2})
     rsp_headers, code, response = get_collection_items(api_, req, 'obs')
     features = json.loads(response)
 
@@ -256,9 +233,9 @@ def test_get_collection_items(config, api_):
     assert links[4]['rel'] == 'collection'
 
     req = mock_api_request({
-        'offset': '1',
-        'limit': '1',
-        'bbox': '-180,-90,180,90'
+        'offset': 1,
+        'limit': 1,
+        'bbox': '-180,90,180,90'
     })
     rsp_headers, code, response = get_collection_items(api_, req, 'obs')
     features = json.loads(response)
@@ -267,16 +244,16 @@ def test_get_collection_items(config, api_):
 
     links = features['links']
     assert len(links) == 6
-    assert '/collections/obs/items?f=json&limit=1&bbox=-180,-90,180,90' in \
+    assert '/collections/obs/items?f=json&limit=1&bbox=-180,90,180,90' in \
         links[0]['href']
     assert links[0]['rel'] == 'self'
-    assert '/collections/obs/items?f=jsonld&limit=1&bbox=-180,-90,180,90' in \
+    assert '/collections/obs/items?f=jsonld&limit=1&bbox=-180,90,180,90' in \
         links[1]['href']
     assert links[1]['rel'] == 'alternate'
-    assert '/collections/obs/items?f=html&limit=1&bbox=-180,-90,180,90' in \
+    assert '/collections/obs/items?f=html&limit=1&bbox=-180,90,180,90' in \
         links[2]['href']
     assert links[2]['rel'] == 'alternate'
-    assert '/collections/obs/items?offset=0&limit=1&bbox=-180,-90,180,90' \
+    assert '/collections/obs/items?offset=0&limit=1&bbox=-180,90,180,90' \
         in links[3]['href']
     assert links[3]['rel'] == 'prev'
     assert '/collections/obs' in links[4]['href']
@@ -385,21 +362,6 @@ def test_get_collection_items(config, api_):
     assert code == HTTPStatus.BAD_REQUEST
 
 
-def test_get_collection_items_include_extra_query_parameters(config, api_):
-    req = mock_api_request()
-    rsp_headers, code, response = get_collection_items(api_, req, 'obs')
-
-    assert code == HTTPStatus.OK
-    response = json.loads(response)
-    assert response['numberMatched'] == 5
-
-    api_.config['resources']['obs']['providers'][0]['include_extra_query_parameters'] = True  # noqa
-    req = mock_api_request({'foo': 'bar'})
-    rsp_headers, code, response = get_collection_items(api_, req, 'obs')
-
-    assert code == HTTPStatus.BAD_REQUEST
-
-
 def test_collection_items_gzip_csv(config, api_, openapi):
     # Add gzip to server
     config['server']['gzip'] = True
@@ -459,7 +421,7 @@ def test_get_collection_items_crs(config, api_):
         assert code == HTTPStatus.OK
         assert rsp_headers['Content-Crs'] == f'<{crs}>'
 
-    # With CRS query parameter, using storageCrs
+    # With CRS query parameter, using storageCRS
     req = mock_api_request({'crs': storage_crs})
     rsp_headers, code, response = get_collection_items(
         api_, req, 'norway_pop')
@@ -561,7 +523,7 @@ def test_manage_collection_item_editable_options_req(config, openapi):
 def test_get_collection_items_json_ld(config, api_):
     req = mock_api_request({
         'f': 'jsonld',
-        'limit': '2'
+        'limit': 2
     })
     rsp_headers, code, response = get_collection_items(api_, req, 'obs')
 
@@ -573,8 +535,8 @@ def test_get_collection_items_json_ld(config, api_):
     assert '@context' in collection
     assert all((f in collection['@context'][0] for
                 f in ('schema', 'type', 'features', 'FeatureCollection')))
-    assert len(collection['@context']) == 1
-    assert collection['@context'][0]['schema'] == 'https://schema.org/'
+    assert len(collection['@context']) > 1
+    assert collection['@context'][1]['schema'] == 'https://schema.org/'
     expanded = jsonld.expand(collection)[0]
     featuresUri = 'https://schema.org/itemListElement'
     assert len(expanded[featuresUri]) == 2
@@ -611,13 +573,6 @@ def test_get_collection_item(config, api_):
     assert 'prev' not in feature['links']
     assert 'next' not in feature['links']
 
-    req = mock_api_request()
-    rsp_headers, code, response = get_collection_item(api_, req, 'norway_pop',
-                                                      '790')
-    feature = json.loads(response)
-
-    assert feature['properties']['name'] == 'Ålesund'
-
 
 def test_get_collection_item_json_ld(config, api_):
     req = mock_api_request({'f': 'jsonld'})
@@ -652,7 +607,7 @@ def test_get_collection_item_json_ld(config, api_):
     expanded = jsonld.expand(feature)[0]
     assert expanded['http://www.opengis.net/ont/geosparql#hasGeometry'][0][
             'http://www.opengis.net/ont/geosparql#asWKT'][0][
-            '@value'] == 'MULTIPOINT ((10 40), (40 30), (20 20), (30 10))'
+            '@value'] == 'MULTIPOINT (10 40, 40 30, 20 20, 30 10)'
     assert expanded['https://schema.org/geo'][0][
             'https://schema.org/polygon'][0][
             '@value'] == "10.0,40.0 40.0,30.0 20.0,20.0 30.0,10.0 10.0,40.0"

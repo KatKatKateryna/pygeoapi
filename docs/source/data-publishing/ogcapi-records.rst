@@ -15,12 +15,12 @@ pygeoapi core record providers are listed below, along with a matrix of supporte
 parameters.
 
 .. csv-table::
-   :header: Provider, properties (filters), resulttype, q, bbox, datetime, sortby, properties (display), domains, CQL, transactions
+   :header: Provider, properties (filters), resulttype, q, bbox, datetime, sortby, properties (display), CQL, transactions
    :align: left
 
-   `ElasticsearchCatalogue`_,✅,results/hits,✅,✅,✅,✅,✅,✅,✅,✅
-   `TinyDBCatalogue`_,✅,results/hits,✅,✅,✅,✅,❌,✅,✅,✅
-   `CSWFacade`_,✅,results/hits,✅,✅,✅,✅,❌,✅,❌,❌
+   `ElasticsearchCatalogue`_,✅,results/hits,✅,✅,✅,✅,✅,✅,✅
+   `TinyDBCatalogue`_,✅,results/hits,✅,✅,✅,✅,❌,✅,✅
+   `CSWFacade`_,✅,results/hits,✅,✅,✅,❌,❌,❌,❌
 
 
 Below are specific connection examples based on supported providers.
@@ -96,11 +96,6 @@ CSW Record core model is supported as a baseline.
          title_field: title
 
 
-Including extra query parameters
---------------------------------
-
-See the :ref:`publishing vector section <including-extra-query-parameters>` for more information on including extra query parameters.
-
 Metadata search examples
 ------------------------
 
@@ -112,18 +107,6 @@ Metadata search examples
 
   * http://localhost:5000/collections/foo/queryables
   
-* queryables on specific properties
-
-  * http://localhost:5000/collections/foo/queryables?properties=title,type
-
-* queryables with current domain values
-
-  * http://localhost:5000/collections/foo/queryables?profile=actual-domain
-
-* queryables on specific properties with current domain values
-
-  * http://localhost:5000/collections/foo/queryables?profile=actual-domain&properties=title,type
-
 * browse records
 
   * http://localhost:5000/collections/foo/items

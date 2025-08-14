@@ -2,7 +2,7 @@
 #
 # Authors: Tom Kralidis <tomkralidis@gmail.com>
 #
-# Copyright (c) 2025 Tom Kralidis
+# Copyright (c) 2024 Tom Kralidis
 #
 # Permission is hereby granted, free of charge, to any person
 # obtaining a copy of this software and associated documentation
@@ -37,7 +37,6 @@ from shapely.geometry import shape
 from tinydb import TinyDB, Query, where
 
 from pygeoapi.provider.base import (BaseProvider, ProviderConnectionError,
-                                    ProviderInvalidQueryError,
                                     ProviderItemNotFoundError)
 from pygeoapi.util import crs_transform, get_typed_value
 
@@ -75,7 +74,7 @@ class TinyDBProvider(BaseProvider):
         else:
             self.db = TinyDB(self.data)
 
-        self.get_fields()
+        self.fields = self.get_fields()
 
     def get_fields(self):
         """
@@ -84,55 +83,38 @@ class TinyDBProvider(BaseProvider):
         :returns: dict of fields
         """
 
-        if not self._fields:
-            try:
-                r = self.db.all()[0]
-            except IndexError as err:
-                LOGGER.debug(err)
-                return {}
+        fields = {}
 
-            for key, value in r['properties'].items():
-                if key not in self._excludes:
-                    typed_value = get_typed_value(str(value))
-                    if isinstance(typed_value, float):
-                        typed_value_type = 'number'
-                    elif isinstance(typed_value, int):
-                        typed_value_type = 'integer'
+        try:
+            r = self.db.all()[0]
+        except IndexError as err:
+            LOGGER.debug(err)
+            return fields
+
+        for key, value in r['properties'].items():
+            if key not in self._excludes:
+                typed_value = get_typed_value(str(value))
+                if isinstance(typed_value, float):
+                    typed_value_type = 'number'
+                elif isinstance(typed_value, int):
+                    typed_value_type = 'integer'
+                else:
+                    typed_value_type = 'string'
+
+                fields[key] = {'type': typed_value_type}
+
+                try:
+                    LOGGER.debug('Attempting to detect date types')
+                    _ = parse_date(value)
+                    if len(value) > 11:
+                        fields[key]['format'] = 'date-time'
                     else:
-                        typed_value_type = 'string'
+                        fields[key]['format'] = 'date'
+                except Exception:
+                    LOGGER.debug('No date types detected')
+                    pass
 
-                    self._fields[key] = {'type': typed_value_type}
-
-                    try:
-                        LOGGER.debug('Attempting to detect date types')
-                        _ = parse_date(value)
-                        if len(value) > 11:
-                            self._fields[key]['format'] = 'date-time'
-                        else:
-                            self._fields[key]['format'] = 'date'
-                    except Exception:
-                        LOGGER.debug('No date types detected')
-                        pass
-
-        return self._fields
-
-    def get_domains(self, properties=[], current=False) -> tuple:
-        records = self.query()
-        domains = {}
-
-        if properties:
-            keys = properties
-        else:
-            keys = records['features'][0]['properties'].keys()
-
-        for key in keys:
-            v = [x['properties'][key] for x in records['features']]
-            v = set([v2 for v2 in v if v2 is not None and isinstance(v2, (float, int, str))])  # noqa
-
-            if v:
-                domains[key] = list(v)
-
-        return domains, True
+        return fields
 
     @crs_transform
     def query(self, offset=0, limit=10, resulttype='results',
@@ -200,11 +182,7 @@ class TinyDBProvider(BaseProvider):
         if properties:
             LOGGER.debug('processing properties')
             for prop in properties:
-                if isinstance(prop[1], str):
-                    value = f"'{prop[1]}'"
-                else:
-                    value = prop[1]
-                QUERY.append(f"(Q.properties['{prop[0]}']=={value})")
+                QUERY.append(f"(Q.properties['{prop[0]}']=={prop[1]})")
 
         QUERY = self._add_search_query(QUERY, q)
 
@@ -216,12 +194,7 @@ class TinyDBProvider(BaseProvider):
         LOGGER.debug('querying database')
         if len(QUERY) > 0:
             LOGGER.debug(f'running eval on {SEARCH_STRING}')
-            try:
-                results = eval(SEARCH_STRING)
-            except SyntaxError as err:
-                msg = 'Invalid query'
-                LOGGER.error(f'{msg}: {err}')
-                raise ProviderInvalidQueryError(msg)
+            results = eval(SEARCH_STRING)
         else:
             results = self.db.all()
 
@@ -376,10 +349,7 @@ class TinyDBCatalogueProvider(TinyDBProvider):
     def __init__(self, provider_def):
         super().__init__(provider_def)
 
-        LOGGER.debug('Refreshing fields')
         self._excludes = ['_metadata-anytext']
-        self._fields = {}
-        self.get_fields()
 
     def get_fields(self):
         fields = super().get_fields()
@@ -401,45 +371,11 @@ class TinyDBCatalogueProvider(TinyDBProvider):
 
         return json_data
 
-    def _prepare_q_param_with_spaces(self, s: str) -> str:
-        """
-        Prepare a search statement for the search term `s`.
-        The term `s` might have spaces.
-
-        Examples (f is shorthand for Q.properties["_metadata-anytext"]):
-        +---------------+--------------------+
-        | search term   | TinyDB search      |
-        +---------------+--------------------+
-        | 'aa'          | f.search('aa')     |
-        | 'aa bb'       | f.search('aa +bb') |
-        | '  aa   bb  ' | f.search('aa +bb') |
-        +---------------+--------------------+
-        """
-        return 'Q.properties["_metadata-anytext"].search("' \
-            + ' +'.join(s.split()) \
-            + '", flags=re.IGNORECASE)'
-
     def _add_search_query(self, query: list, search_term: str = None) -> str:
-        """
-        Create a search query according to the OGC API - Records specification.
-
-        https://docs.ogc.org/is/20-004r1/20-004r1.html (Listing 14)
-
-        Examples (f is shorthand for Q.properties["_metadata-anytext"]):
-        +-------------+-----------------------------------+
-        | search term | TinyDB search                     |
-        +-------------+-----------------------------------+
-        | 'aa'        | f.search('aa')                    |
-        | 'aa,bb'     | f.search('aa')|f.search('bb')     |
-        | 'aa,bb cc'  | f.search('aa')|f.search('bb +cc') |
-        +-------------+-----------------------------------+
-        """
-        if search_term is not None and len(search_term) > 0:
+        if search_term is not None:
             LOGGER.debug('catalogue q= query')
-            terms = [s for s in search_term.split(',') if len(s) > 0]
-            query.append('|'.join(
-                [self._prepare_q_param_with_spaces(t) for t in terms]
-            ))
+            for t in search_term.split():
+                query.append(f"(Q.properties['_metadata-anytext'].search('{t}', flags=re.IGNORECASE))")  # noqa
 
         return query
 

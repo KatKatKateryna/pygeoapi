@@ -4,7 +4,7 @@
 #          Francesco Bartoli <xbartolone@gmail.com>
 #
 # Copyright (c) 2019 Just van den Broecke
-# Copyright (c) 2025 Francesco Bartoli
+# Copyright (c) 2020 Francesco Bartoli
 # Copyright (c) 2022 Tom Kralidis
 #
 # Permission is hereby granted, free of charge, to any person
@@ -30,7 +30,6 @@
 #
 # =================================================================
 
-from copy import deepcopy
 import functools
 import importlib
 import logging
@@ -189,7 +188,7 @@ class OGRProvider(BaseProvider):
         self.conn = None
 
         LOGGER.debug('Grabbing field information')
-        self.get_fields()
+        self.fields = self.get_fields()
 
     def _list_open_options(self):
         return [
@@ -261,43 +260,43 @@ class OGRProvider(BaseProvider):
         :returns: dict of fields
         """
 
-        if not self._fields:
-            try:
-                layer_defn = self._get_layer().GetLayerDefn()
-                for fld in range(layer_defn.GetFieldCount()):
-                    field_defn = layer_defn.GetFieldDefn(fld)
-                    fieldName = field_defn.GetName()
-                    fieldTypeCode = field_defn.GetType()
-                    fieldType = field_defn.GetFieldTypeName(fieldTypeCode)
+        fields = {}
+        try:
+            layer_defn = self._get_layer().GetLayerDefn()
+            for fld in range(layer_defn.GetFieldCount()):
+                field_defn = layer_defn.GetFieldDefn(fld)
+                fieldName = field_defn.GetName()
+                fieldTypeCode = field_defn.GetType()
+                fieldType = field_defn.GetFieldTypeName(fieldTypeCode)
 
-                    fieldName2 = fieldType.lower()
+                fieldName2 = fieldType.lower()
 
-                    if fieldName2 == 'integer64':
-                        fieldName2 = 'integer'
-                    elif fieldName2 == 'real':
-                        fieldName2 = 'number'
+                if fieldName2 == 'integer64':
+                    fieldName2 = 'integer'
+                elif fieldName2 == 'real':
+                    fieldName2 = 'number'
 
-                    self._fields[fieldName] = {'type': fieldName2}
+                fields[fieldName] = {'type': fieldName2}
 
-                    if fieldName2 == 'datetime':
-                        self._fields[fieldName] = {
-                            'type': 'string',
-                            'format': 'date-time'
-                        }
+                if fieldName2 == 'datetime':
+                    fields[fieldName] = {
+                        'type': 'string',
+                        'format': 'date-time'
+                    }
 
-                    # fieldWidth = layer_defn.GetFieldDefn(fld).GetWidth()
-                    # GetPrecision = layer_defn.GetFieldDefn(fld).GetPrecision() # noqa
+                # fieldWidth = layer_defn.GetFieldDefn(fld).GetWidth()
+                # GetPrecision = layer_defn.GetFieldDefn(fld).GetPrecision()
 
-            except RuntimeError as err:
-                LOGGER.error(err)
-                raise ProviderConnectionError(err)
-            except Exception as err:
-                LOGGER.error(err)
+        except RuntimeError as err:
+            LOGGER.error(err)
+            raise ProviderConnectionError(err)
+        except Exception as err:
+            LOGGER.error(err)
 
-            finally:
-                self._close()
+        finally:
+            self._close()
 
-        return self._fields
+        return fields
 
     def query(self, offset=0, limit=10, resulttype='results',
               bbox=[], datetime_=None, properties=[], sortby=[],
@@ -528,14 +527,6 @@ class OGRProvider(BaseProvider):
 
         if skip_geometry:
             json_feature['geometry'] = None
-
-        # Drop non-defined properties
-        if self.properties:
-            props = json_feature['properties']
-            dropping_keys = deepcopy(props).keys()
-            for item in dropping_keys:
-                if item not in self.properties:
-                    props.pop(item)
 
         try:
             json_feature['id'] = json_feature['properties'].pop(

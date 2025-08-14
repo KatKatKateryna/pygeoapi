@@ -1,183 +1,755 @@
 {% extends "_base.html" %}
-{% block title %}{{ super() }} {{ data['title'] }} {% endblock %}
-{% block crumbs %}{{ super() }}
-/ <a href="{{ data['collections_path'] }}">{% trans %}Collections{% endtrans %}</a>
-{% for link in data['links'] %}
-  {% if link.rel == 'collection' %} /
-    <a href="{{ data['dataset_path'] }}">{{ link['title'] | string | truncate( 25 ) }}</a>
-    {% set col_title = link['title'] %}
-  {% endif %}
-{% endfor %}
-/ <a href="{{ data['items_path']}}">{% trans %}Items{% endtrans %}</a>
-{% endblock %}
 {% block extrahead %}
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.3.1/dist/leaflet.css"/>
     <script src="https://unpkg.com/leaflet@1.3.1/dist/leaflet.js"></script>
     <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.css"/>
     <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.Default.css"/>
     <script src="https://unpkg.com/leaflet.markercluster/dist/leaflet.markercluster-src.js"></script>
+    
+    <script src="https://unpkg.com/deck.gl@latest/dist.min.js"></script>
+    <script src="https://cdn.maptiler.com/maptiler-sdk-js/v2.2.2/maptiler-sdk.umd.js"></script>
+    <link href="https://cdn.maptiler.com/maptiler-sdk-js/v2.2.2/maptiler-sdk.css" rel="stylesheet" />
+{% endblock %}
+
+{% block body_map %}
+  
+
+  <div class="row">
+    {% if data['speckle_url'] %}
+    
+
+    <div id="map2d" style="height: 80vh;"></div>
+    <div id="map3d" style="height: 0vh;"></div>
+    {% else %}
+
+    <div class="form-group" >
+      <label class="switch">3D
+        <input id="modeSwitch" type="checkbox" disabled="true">
+        <span class="slider round"></span>
+      </label>
+    </div>
+    
+    <div id="map2d" style="height: 40vh;"></div>
+    {% endif %}
+  </div>
+
 {% endblock %}
 
 {% block body %}
-  <section id="items"></section>
-  <section id="collection">
-    <h1>{% for l in data['links'] if l.rel == 'collection' %} {{ l['title'] }} {% endfor %}</h1>
-  </section>
-  <section id="items">
-    {% if data['features'] %}
+
+  <section id="description">
     <div class="row">
-      <div class="col-sm-12 col-md-6">
-        <div class="row">
-          <div class="col-sm-12">
-            <div id="items-map"></div>
+      <p> </p>
+    </div>
+
+    <div class="row">
+      <tr>
+        <p>
+          This is the test deployment of the OGC API server for public Speckle projects. 
+          It allows you to share your Speckle model as geospatial data in the format of 
+          OGC API Features / Web Feature Service, so it can be natively added to a QGIS, ArcGIS 
+          or Civil3D project, or embedded into a web map using Leaflet, OpenLayers or other libraries. 
+          You can find more guidelines and examples on our <a href = "https://github.com/specklesystems/pygeoapi/tree/dev" target="_blank">GitHub page</a>. 
+        </p>
+      </tr>
+      
+      {% if not data['speckle_url'] %}
+      <tr>
+        <p>
+          <div  style="height: fit-content;">
+            <p> Provide Speckle Model link as an argument to start exploring, e.g.:  <a href = "https://geo.speckle.systems/?speckleUrl=https://app.speckle.systems/projects/64753f52b7/models/338b386787&lat=-0.031405&lon=109.335828">https://geo.speckle.systems/?speckleUrl=https://app.speckle.systems/projects/64753f52b7/models/338b386787&lat=-0.031405&lon=109.335828</a></p>
           </div>
-          <div class="col-sm-12">
-            <div class="row">
-                <div class="col-sm-12">
-                    {% if data['numberMatched'] %}
-                    <p>{% trans %}Items in this collection{% endtrans %}: {{ data['numberMatched'] }}</p>
+        </p>
+      </tr>
+
+      {% else %}
+      <details>
+      <summary><b>Details of the current Speckle model</b></summary>
+        
+      <section id="url_parameters">
+        {% if data['features'] %}
+        
+        <div class="row">
+          <p> </p>
+        </div>
+        
+        <div class="row">
+          <p>{% trans %}Note: if Speckle model location data is available, the relevant URL parameters will be ignored. If neither model nor URL parameters specify the location, model will be placed randomly. {% endtrans %}</p>
+        </div>
+
+        <div class="row">
+        <div class="col-md-6 col-sm-12">
+            <b>{% trans %}Speckle model data  {% endtrans %}</b>      
+            <div style="overflow-x: scroll;">
+              <table class="table table-bordered">
+                <thead>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td >Project name:</td>
+                    <td>{{ data['project'] }}</td>
+                  </tr>
+                  <tr>
+                    <td >Model name:</td>
+                    <td>{{ data['model'] }}</td>
+                  </tr>
+                  <tr>
+                    <td >Last version created:</td>
+                    <td>{{ data['model_last_version_date'] }}</td>
+                  </tr>
+
+
+                    <tr>
+                      <td >Coordinate Reference System:</td>
+                      <td>{{ data['model_crs'] }}</td>
+                    </tr>
+
+                </tbody>
+                </table>
+            </div>
+        </div>
+        
+        <div class="col-md-6 col-sm-12">
+            <b>{% trans %}URL parameters  {% endtrans %}</b>
+            <div style="overflow-x: scroll;">
+              <table class="table table-bordered">
+                <thead>
+                </thead>
+                <tbody>
+
+                    <tr>
+                      <td >Speckle URL ('speckleurl')</td>
+                        <td>
+                          <a href="{{ data['speckle_url'] }}">
+                            {{ data['speckle_url'] }}
+                          </a>
+                      </td>
+                    </tr>
+                    <tr>
+                      <td>Requested data type ('datatype')</td>
+                      <td>{{ data['requested_data_type'] }}</td>
+                    </tr>
+                    <tr>
+                      <td>Prioritize object attributes over display quality ('preserveattributes')</td>
+                      <td>{{ data['preserve_attributes'] }}</td>
+                    </tr>
+                    <tr>
+                      <td >Coordinate Reference System ID ('crsauthid')</td>
+                      <td>{{ data['crs_authid'] }}</td>
+                    </tr>
+                    <tr>
+                      <td>Latitide ('lat')</td>
+                      <td>{{ data['lat'] }}</td>
+                    </tr>
+                    <tr>
+                      <td>Longitude ('lon')</td>
+                      <td>{{ data['lon'] }}</td>
+                    </tr>
+                    <tr>
+                      <td >Angle to True North, in degrees ('northdegrees')</td>
+                      <td>{{ data['north_degrees'] }}</td>
+                    </tr>
+                    <tr>
+                      <td >Feature limit ('limit')</td>
+                      <td>{{ data['limit'] }}</td>
+                    </tr>
+
+                </tbody>
+                </table>
+            </div>
+        </div>
+        
+        <div class="row">
+          <p> </p>
+        </div>
+
+      
+      </section>
+
+      <section id="items">
+
+        <div class="row">
+          <p> </p>
+        </div>
+
+        <div class="row">
+          <b>{% trans %}Features in this model {% endtrans %}</b>    
+          <div style="overflow-x: scroll;">
+            {% set props = [] %}
+            <table class="table table-striped table-bordered">
+              <thead>
+                <tr>
+                  {% if data.get('uri_field') %}
+                    {% set uri_field = data.uri_field %}
+                    <th>{{ uri_field }}</th>
+                  {% elif data.get('title_field') %}
+                    {% set title_field = data.title_field %}
+                    <th>{{ title_field }}</th>
+                  {% else %}
+                    <th>id</th>
+                  {% endif %}
+
+                  {% for k in data['features'][0]['properties'].keys() %}
+                    {% if k not in [data.id_field, data.title_field, data.uri_field, 'extent'] %}
+                      {% set props = props.append(k) %}
+                      <th>{{ k | striptags }}</th>
                     {% endif %}
-                </div>
-            </div>
-            <div class="row">
-                <div class="col-sm-12">
-                  {% trans %}Limit{% endtrans %}:
-                  <select id="limits">
-                    <option value="{{ config['server']['limits']['default_items'] }}">{{ config['server']['limits']['default_items'] }} ({% trans %}default{% endtrans %})</option>
-                    <option value="100">100</option>
-                    <option value="1000">1,000</option>
-                    <option value="2000">2,000</option>
-                  </select>
-                  <p>{% trans %}Warning: Higher limits not recommended!{% endtrans %}</p>
-                  <script>
-                    var select = document.getElementById('limits');
-                    var defaultValue = select.getElementsByTagName('option')[0].value;
-                    let params = (new URL(document.location)).searchParams;
-                    select.value = params.get('limit') || defaultValue;
-                    select.addEventListener('change', ev => {
-                      var limit = ev.target.value;
-                      document.location.search = `limit=${limit}`;
-                    });
-                  </script>
-                </div>
-            </div>
-            <div class="row">
-              <div class="col-sm-12">
-                {% for link in data['links'] %}
-                {% if link['rel'] == 'prev' and data['offset'] > 0 %}
-                <a role="button" href="{{ link['href'] }}">{% trans %}Prev{% endtrans %}</a>
-                {% elif link['rel'] == 'next' and data['features'] %}
-                <a role="button" href="{{ link['href'] }}">{% trans %}Next{% endtrans %}</a>
-                {% endif %}
+                  {% endfor %}
+                </tr>
+              </thead>
+              <tbody>
+                {% for ft in data.features %}
+                  <tr>
+                      {% set title_field = data.title_field %}
+                      <td data-label="{{ title_field }}">
+                        <a title="{{ ft.properties.get(title_field) }}" href="{{data['speckle_url'].split('/models')[0]}}/models/{{ft.id.split('_')[0]}}" target="_blank">
+                          {{ ft.properties.get(title_field) | string | truncate( 35 ) }}
+                        </a>
+                      </td>
+
+                    {% for prop in props %}
+                      <td data-label="{{ prop }}">
+                        {{ ft.properties.get(prop, '') | string | truncate( 35 ) }}
+                      </td>
+                    {% endfor %}
+
+                  </tr>
                 {% endfor %}
-              </div>
-            </div>
+              </tbody>
+              </table>
           </div>
         </div>
-      </div>
-
-      <div class="col-sm-12 col-md-6" style="overflow-x: scroll;">
-        {% set props = [] %}
-        <table class="table table-striped table-bordered">
-          <thead>
-            <tr>
-              {% if data.get('uri_field') %}
-                {% set uri_field = data.uri_field %}
-                <th>{{ uri_field }}</th>
-              {% elif data.get('title_field') %}
-                {% set title_field = data.title_field %}
-                <th>{{ title_field }}</th>
-              {% else %}
-                <th>id</th>
-              {% endif %}
-
-              {% for k in data['features'][0]['properties'].keys() %}
-                {% if k not in [data.id_field, data.title_field, data.uri_field, 'extent'] %}
-                  {% set props = props.append(k) %}
-                  <th>{{ k | striptags }}</th>
-                {% endif %}
-              {% endfor %}
-            </tr>
-          </thead>
-          <tbody>
-            {% for ft in data.features %}
-              <tr>
-                {% if data.get('uri_field') %}
-                  {% set uri_field = data.uri_field %}
-                  <td data-label="{{ uri_field }}">
-                    <a href="{{ ft.properties.get(uri_field) }}" title="{{ ft.properties.get(uri_field) }}">
-                      {{ ft.properties.get(uri_field) }}
-                    </a>
-                  </td>
-                {% elif data.get('title_field') %}
-                  {% set title_field = data.title_field %}
-                  <td data-label="{{ title_field }}">
-                    <a href="{{ data.items_path }}/{{ ft['id'] }}" title="{{ ft.properties.get(title_field) }}">
-                      {{ ft.properties.get(title_field) | string | truncate( 35 ) }}
-                    </a>
-                  </td>
-                {% else %}
-                  <td data-label="id">
-                    <a href="{{ data.items_path }}/{{ ft.id }}" title="{{ ft.id }}">
-                      {{ ft.id | string | truncate( 12 )  }}
-                    </a>
-                  </td>
-                {% endif %}
-
-                {% for prop in props %}
-                  <td data-label="{{ prop }}">
-                    {{ ft.properties.get(prop, '') | string | truncate( 35 ) }}
-                  </td>
-                {% endfor %}
-
-              </tr>
-            {% endfor %}
-          </tbody>
-          </table>
-      </div>
-    </div>
-    {% elif data['numberMatched'] %}
-    <div class="row">
-      <div class="col-sm-12">
-        <p>{% trans %}Items in this collection{% endtrans %}: {{ data['numberMatched'] }}</p>
-      </div>
-    </div>
-    {% else %}
-    <div class="row col-sm-12">
-        <p>{% trans %}No items{% endtrans %}</p>
-    </div>
+        {% else %}
+        <div class="row">
+            <p>{% trans %}No items{% endtrans %}</p>
+        </div>
+        {% endif %}
+      </section>
+      
+      
+    </details>
+    
+    <tr><p></p></tr>
     {% endif %}
-    </section>
+
+
+      <tr>
+        <p>
+          You can use the current link to access OGC API dataset in your preferred software, 
+          as well as explore the data in the browser and share with others. URL should start with 'https://geo.speckle.systems/?' 
+          followed by required and optional parameters. Parameters should be separated with '&' symbol. 
+          Use the following URL parameters to construct a link that provides Speckle data with your preferred settings: 
+        </p>
+      </tr>
+      <tr>
+        <i>- speckleUrl</i><p> text, required, should contain path to a specific Model in Speckle Project, e.g. 'https://app.speckle.systems/projects/344f803f81/models/5582ab673e'
+        </p>
+      </tr>
+      <tr>
+        <i>- dataType</i><p> text, optional, choose from: points, lines, polygons or projectcomments
+        </p>
+      </tr>
+      <tr>
+        <i>- limit</i><p> positive integer, recommended, as some applications might apply their custom feature limit
+        </p>
+      </tr>
+      <tr>
+        <i>- preserveAttributes</i><p> string, optional, choose from: true, false. If not set, meshes will be split into separate polygons for better display quality.
+        </p>
+      </tr>
+      <tr>
+        <i>- crsAuthid</i><p> text, an authority string e.g. 'epsg:4326'. If set, LAT, LON and NORTHDEGREES arguments will be ignored.
+        </p>
+      </tr>
+      <tr>
+        <i>- lat</i><p> number, in range -90 to 90
+        </p>
+      </tr>
+      <tr>
+        <i>- lon</i><p> number, in range -180 to 180
+        </p>
+      </tr>
+      <tr>
+        <i>- northDegrees</i><p> number, in range -180 to 180
+        </p>
+      </tr>
+      <tr>
+        <p>
+          If GIS-originated Speckle model is loaded, no location arguments are needed.  
+        </p>
+      </tr>
+      <tr>
+      </tr>
+      
+  </tr><p></p>
+  <tr>
+
+      <tr>
+        <p>
+          Here are some examples: 
+        </p>
+      </tr>
+      <tr>
+        <p>
+          1. QGIS polygon features: <a href = "https://geo.speckle.systems/?speckleUrl=https://app.speckle.systems/projects/344f803f81/models/5582ab673e&datatype=polygons&preserveAttributes=true">https://geo.speckle.systems/?speckleUrl=https://app.speckle.systems/projects/344f803f81/models/5582ab673e&datatype=polygons&preserveAttributes=true</a>
+        </p>
+      </tr>
+      <tr>
+        <p>
+          2. QGIS point features: <a href = "https://geo.speckle.systems/?speckleUrl=https://app.speckle.systems/projects/344f803f81/models/8c49788b1f&datatype=points&preserveAttributes=true">https://geo.speckle.systems/?speckleUrl=https://app.speckle.systems/projects/344f803f81/models/8c49788b1f&datatype=points&preserveAttributes=true</a>
+        </p>
+      </tr>
+      <tr>
+        <p>
+          3. Rhino building masses: <a href = "https://geo.speckle.systems/?speckleUrl=https://app.speckle.systems/projects/64753f52b7/models/338b386787&lat=-0.031405&lon=109.335828">https://geo.speckle.systems/?speckleUrl=https://app.speckle.systems/projects/64753f52b7/models/338b386787&lat=-0.031405&lon=109.335828</a>
+        </p>
+      </tr>
+      <tr>
+        <p>
+          4. Rhino detailed building: <a href = "https://geo.speckle.systems/?speckleUrl=https://app.speckle.systems/projects/5feae56049/models/9c43d7569c&limit=100000&northDegrees=-117">https://geo.speckle.systems/?speckleUrl=https://app.speckle.systems/projects/5feae56049/models/9c43d7569c&limit=100000&northDegrees=-117</a>
+        </p>
+      </tr>
+      <tr>
+        <p>
+          5. Speckle project comments: <a href = "https://geo.speckle.systems/?speckleUrl=https://app.speckle.systems/projects/344f803f81/models/5582ab673e&datatype=projectcomments">https://geo.speckle.systems/?speckleUrl=https://app.speckle.systems/projects/344f803f81/models/5582ab673e&datatype=projectcomments</a>
+        </p>
+      </tr>
+      
+    </tr><p></p>
+    <tr>
+  
+      <tr>
+        <p>
+          <b>Note: this is not a production server.</b> It is still work in progress, 
+          and we are very curious 
+          to <a href = "https://speckle.community/invites/qxEmQb1QcM" target="_blank">hear about your use case and your feedback</a>
+          so we can make it better!
+        </p>
+      </tr>
+    </div>
+  </section>
+ 
+  
 {% endblock %}
 
 {% block extrafoot %}
-{% if data['features'] %}
+
     <script>
-    var map = L.map('items-map').setView([{{ 45 }}, {{ -75 }}], 5);
-    map.addLayer(new L.TileLayer(
-        '{{ config['server']['map']['url'] }}', {
-            maxZoom: 18,
-            attribution: '{{ config['server']['map']['attribution'] | safe }}'
-        }
-    ));
-    var geojson_data = {{ data['features'] | to_json | safe }};
+      try {
+        document.getElementById("loading_screen").remove();
+        document.getElementById("loading_screen_band").remove();
+      }
+      catch(err) {}
 
-    var items = new L.GeoJSON(geojson_data, {
-        onEachFeature: function (feature, layer) {
-            var url = '{{ data['items_path'] }}/' + feature.id + '?f=html';
-            var html = '<span><a href="' + url + '">' + {% if data['title_field'] %} feature['properties']['{{ data['title_field'] }}'] {% else %} feature.id {% endif %} + '</a></span>';
-            layer.bindPopup(html);
-        }
-    });
-    var markers = L.markerClusterGroup({
-        disableClusteringAtZoom: 9,
-        chunkedLoading: true,
-        chunkInterval: 500,
-    });
-    markers.clearLayers().addLayer(items);
-    map.addLayer(markers);
+      // attach even to modeSwitch btn
+      document.getElementById("modeSwitch").onclick = switchMode;
+      var el = document.getElementById("modeSwitch");
+      if (el.addEventListener)
+          el.addEventListener("click", switchMode, false);
+      else if (el.attachEvent)
+          el.attachEvent('onclick', switchMode);
 
-    map.fitBounds(items.getBounds());
+      function switchMode() {
+        btn = document.getElementById('modeSwitch');
+        if (btn.checked){
+          document.getElementById('map2d').style.height = '0vh';
+          document.getElementById('map3d').style.height = '80vh';
+        }
+        else {
+          document.getElementById('map2d').style.height = '80vh';
+          document.getElementById('map3d').style.height = '0vh';
+        }
+      }
+
+      function split_polygons(geojson_data){
+          features = []
+          geojson_data.forEach((element, index) => {
+              if (element.geometry.type == "MultiPolygon"){
+                  // mesh faces are stored as parts, so most buildings might have hundreds of parts with just 1 loop or 3-4pts
+                  all_parts = element.geometry.coordinates;
+                  
+                  // loops are usually simple (3-4 vertices), and usually only loop
+                  for (polyPart of all_parts){
+                      new_coordinates = [polyPart];
+                      new_element = {"id": element.properties.id, "type":"Feature", 
+                          "geometry": {"type": "MultiPolygon", "coordinates": new_coordinates}, 
+                          "properties": element.properties,
+                          "displayProperties": element.displayProperties };
+
+                      features.push(new_element)
+                      }
+              }
+              else {
+                  features.push(element)
+              }
+          });  
+
+          return features
+      }
+
+      var data = {{ data | to_json | safe }};
+      var geojson_data_original = {{ data['features'] | to_json | safe }};
+      
+      // Leaflet 2d map 
+      function initialize2d() {
+          var map = L.map('map2d', {zoomControl: false}).setView([45, 0], 2);
+          L.control.zoom({
+              position: 'topright'
+          }).addTo(map);
+          var tileLayer = new L.TileLayer(
+              '{{ config['server']['map']['url'] }}', {
+                  maxZoom: 22,
+                  minZoom: 12,
+                  attribution: '{{ config['server']['map']['attribution'] | safe }}  &copy; Data: <a href="https://speckle.systems/">Speckle Systems</a>'
+              }
+          );
+
+          geojson_data = split_polygons(geojson_data_original);
+          project_url = "" 
+          try {
+            project_url = data['speckle_url'].split("/models")[0]
+          }
+          catch(err) {}
+      
+
+          var items = new L.GeoJSON(geojson_data, {
+              filter: (feature) => {
+                return feature.displayProperties["object_type"] == "geometry"
+              },
+              pointToLayer: (feature, latlng) => {
+                  return new L.circleMarker(latlng)            
+              },
+              onEachFeature: function (feature, layer) {
+                  var url = project_url + '/models/' + feature.id.split("_")[0]
+                  var html = '<span><td><p>' + feature['properties']['speckle_type'] + '</p></td><a href="' + url + '" target="_blank">' + feature['properties']['id'].split("_")[0] + '</a></span>';
+                  layer.bindPopup(html);
+
+                  var myFillColor = feature.displayProperties['color'];
+                  var mylineWeight = feature.displayProperties['lineWidth'];
+                  var myRadius = feature.displayProperties['radius'];
+
+                  layer.setStyle({
+                      fillColor: myFillColor,
+                      color: myFillColor,
+                      fillOpacity: 0.8,
+                      weight: mylineWeight,
+                      radius: myRadius
+                  });
+              }
+          }); //.addTo(map);
+          
+          var comments = new L.GeoJSON(geojson_data, {
+              filter: (feature) => {
+                return feature.displayProperties["object_type"] == "comment"
+              },
+              pointToLayer: (feature, latlng) => {
+                  return new L.marker(latlng)            
+              },
+              onEachFeature: function (feature, layer) {
+                  var url = project_url + '/models/' + feature.properties.resource_id + '#threadId=' + feature.id; 
+                  var html = '<span><td><a href="' + url + '" target="_blank">Go to thread</a></td> <td><p>' + feature['properties']['text_html'] + '</p></td>  </span>';
+                  layer.bindPopup(html);
+              }
+          }); //.addTo(map);
+          
+          
+          var group = L.featureGroup([items, comments]);
+          // load proper basemap for Speckle models; but only zoomed-out one for empty data
+          try
+          {
+            bounds = group.getBounds();
+            map.fitBounds(bounds);
+
+            tileLayer.addTo(map);
+            group.addTo(map);
+          }
+          catch (err){
+            tileLayer = new L.TileLayer(
+              '{{ config['server']['map']['url'] }}', {
+                  maxZoom: 2,
+                  minZoom: 2,
+                  attribution: '{{ config['server']['map']['attribution'] | safe }}  &copy; Data: <a href="https://speckle.systems/">Speckle Systems</a>'
+              }
+            );
+            tileLayer.addTo(map);
+          }
+
+          
+
+          //map.addLayer(lines);
+          // map.setZoom(19); // in order for the tiles to load
+      };
+
+
+      // MapTiler 3d map
+      function hexToRgb(hex) {
+          var result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+          return result ? [parseInt(result[1], 16), parseInt(result[2], 16), parseInt(result[3], 16), parseInt(result[0], 16)] : null;
+          };
+      function  rgbaToArgbList(color) {
+          if (color == null){
+            return [10,132,255,255];
+          }
+          col = color.replace('rgba(','').replace(')','').split(',',4);
+          value = [ parseInt(col[0]), parseInt(col[1]), parseInt(col[2]), parseInt(col[3]) ];
+          return value;
+          }
+      function  rgbaToArgbListDarker(color) {
+          if (color == null){
+            return [7,120,235,255];
+          }
+          col = color.replace('rgba(','').replace(')','').split(',',4);
+          value = [ parseInt(col[0])*0.95, parseInt(col[1])*0.95, parseInt(col[2])*0.95, parseInt(col[3]) ];
+          return value;
+          }
+      function getMessagesNumber(properties)
+        { 
+          if (properties == null || properties.messages == null) {return 1}
+          else 
+          {
+            return properties.messages.length
+          }
+        }
+      function getDisplayText(properties)
+      {
+        if (properties != null && properties.text_html != null){
+          return properties.text_html
+        }
+        else if (properties != null && properties.speckle_type != null && properties.id != null){
+          return `${properties.speckle_type}: ${properties.id.split("_")[0]}`
+        }
+        else{
+          return ``
+        }
+      }
+      // Callback to populate the default tooltip with content
+      function getTooltip({object}) {
+        return object && {
+          html: getDisplayText(object.properties),
+          style: {
+            backgroundColor: 'rgb(255,255,255)',
+            color: 'rgb(0,0,0)',
+            fontSize: '0.9em'
+          }
+        };
+      }
+      function createSVGIcon(n) {
+        const label = n < 10 ? n.toString() : '10+';
+        return `\
+        <svg width="100" height="100" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="12" cy="12" r="10" fill="rgb(10,132,255)" stroke="rgb(200,200,200)" stroke-width="2"/>
+          <text x="12" y="12" fill="#fff" text-anchor="middle" alignment-baseline="middle" font-family="verdana" font-size="8">${label}</text>
+        </svg>`;
+      }
+
+      // Note that a xml string cannot be directly embedded in a data URL
+      // it has to be either escaped or converted to base64.
+      function svgToDataUrl(svg) {
+        return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+      }
+
+      // You may need base64 encoding if the SVG contains certain special characters
+      function svgToDataUrlBase64(svg) {
+        return `data:image/svg+xml;base64,${btoa(svg)}`;
+      }
+
+
+      function initialize3d() {
+          maptilersdk.config.apiKey = '{{ config["server"]["map"]["key"] }}'; 
+          speckle_data = JSON.parse(JSON.stringify(data))
+
+          var speckle_features = []
+          for (let i = 0; i < speckle_data.features.length; i++) {
+              feature = speckle_data.features[i];
+              coords = feature.geometry.coordinates;
+
+              if (feature.geometry.type.includes("Polygon")) {
+
+                  polygon_all_parts = []
+                  // iterate through Polygon Parts
+                  for (let p = 0; p < coords.length; p++) {
+
+                      // check orientation of each PolygonPart, if vertical - shift points slightly
+                      polygon_part = [];
+                      inner = false;
+
+                      for (let c = 0; c < coords[p].length; c++) {
+                          polygon_part_loop = [];
+                          if (c>0){
+                            inner = true;
+                          }
+
+                          sum_orientation = 0;
+                          polygon_pts = coords[p][c]; // usually 3 for Mesh faces
+                          for (let k = 0; k < polygon_pts.length; k++){
+                              index = k + 1
+                              if (k == polygon_pts.length - 1){index = 0}
+                              pt = polygon_pts[k]
+                              pt2 = polygon_pts[index]
+                              sum_orientation += (pt2[0] - pt[0]) * (pt2[1] + pt[1]) 
+                          };
+
+                          createdPolygon = false;
+                          
+                          if (-0.000000001 < sum_orientation && sum_orientation <0.000000001){
+
+                              coords[p][c][0][0] += 0.0000001;
+                              coords[p][c][0][1] += 0.0000001;
+
+                              coords[p][c][1][0] -= 0.0000001;
+                              coords[p][c][1][1] -= 0.0000001;
+
+                              coords[p][c][2][0] += 0.0000001;
+                              coords[p][c][2][1] += 0.0000001;
+
+                              if(polygon_pts.length==3) {
+                                createdPolygon = true;
+
+                                multipolygon_coords = coords[p][c];
+                                polygon_part_loop = multipolygon_coords;
+
+                                polygon_part = [polygon_part_loop];
+                                polygon_all_parts.push(polygon_part);                                
+                                          
+                              }
+                              else if (polygon_pts.length==4) {
+                                  createdPolygon = true;
+
+                                  multipolygon_coords = coords[p][c].slice(0,3);
+                                  polygon_part_loop = multipolygon_coords;
+
+                                  polygon_part = [polygon_part_loop];
+                                  polygon_all_parts.push(polygon_part);
+
+                                  /////////
+                                  multipolygon_coords = [coords[p][c][2], coords[p][c][3], coords[p][c][0]];
+                                  polygon_part_loop = multipolygon_coords;
+
+                                  polygon_part = [polygon_part_loop];
+                                  polygon_all_parts.push(polygon_part);
+                              };
+                              
+                          };
+                          if (createdPolygon == false){ // if non-vertical, or vertical with more than 4 vertices
+                              
+                              multipolygon_coords = coords[p][c];
+                              polygon_part_loop = multipolygon_coords;
+
+                              if (inner == false){ 
+                                  polygon_part = [polygon_part_loop];
+                                  polygon_all_parts.push(polygon_part);
+                                }
+                              else{ 
+                                  polygon_all_parts[polygon_all_parts.length-1].push(polygon_part_loop);
+                              }
+                          }
+                          
+                      };
+                      
+                  };
+                  
+                  new_polygon = {"id": speckle_features.length, "type":"Feature", 
+                          "geometry": {"type": "MultiPolygon", "coordinates":polygon_all_parts}, 
+                          "properties": speckle_data.features[i].properties,
+                          "displayProperties": speckle_data.features[i].displayProperties };
+
+                  new_polygon.displayProperties.lineWidth = 0.05
+                  speckle_features.push(new_polygon);
+
+              } 
+              else if (speckle_data.features[i].displayProperties.object_type == "comment")
+              {   
+                  speckle_features.push({"id": speckle_features.length, "type":"Feature", 
+                      "geometry": {"type": speckle_data.features[i].geometry.type, "coordinates":speckle_data.features[i].geometry.coordinates}, 
+                      "properties": speckle_data.features[i].properties,
+                      "displayProperties": 
+                        {
+                          "color": 'rgba(10,132,255,255)',
+                          "lineWidth": 2,
+                          "radius": 10,
+                          "object_type": "comments",
+                        } 
+                      });
+              }
+              else
+              {   
+                  speckle_features.push({"id": speckle_features.length, "type":"Feature", 
+                      "geometry": {"type": speckle_data.features[i].geometry.type, "coordinates":speckle_data.features[i].geometry.coordinates}, 
+                      "properties": speckle_data.features[i].properties,
+                      "displayProperties": speckle_data.features[i].displayProperties });
+              }
+          }
+          
+          var extent = speckle_data["extent"];
+
+          speckle_data.features = [];
+          speckle_features.forEach((element, index, array) => {
+            if (element.displayProperties.object_type != "comments"){
+              speckle_data.features.push(element);
+            }
+          });  
+
+          speckle_comments = [];
+          speckle_features.forEach((element, index, array) => {
+            if (element.displayProperties.object_type == "comments"){
+              speckle_comments.push(element);
+            }
+          });
+
+          // Create deck.gl map
+          const deckgl = new deck.DeckGL({
+              container: 'map3d',
+              map: maptilersdk,
+              mapStyle: maptilersdk.MapStyle.STREETS.PASTEL,
+              initialViewState: {
+                longitude: extent[0] + (extent[2]-extent[0])/2,
+                latitude: extent[1] + (extent[3]-extent[1])/2,
+                zoom: 22,
+                minZoom: 12,
+                pitch: 60,
+                bearing: 1.469387755102039
+              },
+              controller: true,
+
+              layers: [
+              
+              new deck.GeoJsonLayer({
+                  id: 'speckle_data',
+                  data: speckle_data,
+                  // Styles
+                  filled: true,
+                  getFillColor: f => rgbaToArgbList(f.displayProperties.color),
+                  getLineWidth: f => f.displayProperties.lineWidth,
+                  getLineColor: f => rgbaToArgbListDarker(f.displayProperties.color),
+                  getPointRadius: f => f.displayProperties.radius / 2,
+
+                  // Interactive props
+                  pickable: true,
+                  autoHighlight: true,
+              }),
+              
+              new deck.IconLayer({
+                id: 'IconLayer',
+                data: speckle_comments,
+                // getColor: d => [Math.sqrt(getMessagesNumber(d.properties)), 140, 0],
+                
+                getIcon: d => ({
+                  url: svgToDataUrl(createSVGIcon( getMessagesNumber(d.properties).toString() )), //'https://raw.githubusercontent.com/visgl/deck.gl-data/master/website/icon-atlas.png',
+                  width: 128,
+                  height: 128
+                }),
+                getPosition: d => d.geometry.coordinates[0],
+                getSize: f => 50 * Math.pow(getMessagesNumber(f.properties),0.3),
+                pickable: true
+              })
+              ],
+              getTooltip
+          });
+    }
+
+    initialize2d();
+    initialize3d();
+
     </script>
-{% endif %}
+
 {% endblock %}

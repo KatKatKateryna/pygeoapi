@@ -31,10 +31,11 @@
 Returns content as linked data representations
 """
 
+import json
 import logging
 from typing import Callable
 
-from pygeoapi.util import is_url, render_j2_template, url_join
+from pygeoapi.util import is_url, render_j2_template
 from pygeoapi import l10n
 from shapely.geometry import shape
 from shapely.ops import unary_union
@@ -188,22 +189,30 @@ def geojson2jsonld(cls, data: dict, dataset: str,
     :returns: string of rendered JSON (GeoJSON-LD)
     """
 
-    LOGGER.debug('Fetching context from resource configuration')
-    context = cls.config['resources'][dataset].get('context', []).copy()
-    templates = cls.get_dataset_templates(dataset)
+    LOGGER.debug('Fetching context and template from resource configuration')
+    jsonld = cls.config['resources'][dataset].get('linked-data', {})
+    ds_url = f"{cls.get_collections_url()}/{dataset}"
+
+    context = jsonld.get('context', []).copy()
+    template = jsonld.get('item_template', None)
 
     defaultVocabulary = {
         'schema': 'https://schema.org/',
-        'gsp': 'http://www.opengis.net/ont/geosparql#',
         'type': '@type'
     }
 
     if identifier:
+        # Single jsonld
+        defaultVocabulary.update({
+            'gsp': 'http://www.opengis.net/ont/geosparql#'
+        })
+
         # Expand properties block
         data.update(data.pop('properties'))
 
         # Include multiple geometry encodings
         if (data.get('geometry') is not None):
+            data['type'] = 'schema:Place'
             jsonldify_geometry(data)
 
         data['@id'] = identifier
@@ -215,7 +224,6 @@ def geojson2jsonld(cls, data: dict, dataset: str,
             'FeatureCollection': 'schema:itemList'
         })
 
-        ds_url = url_join(cls.get_collections_url(), dataset)
         data['@id'] = ds_url
 
         for i, feature in enumerate(data['features']):
@@ -225,15 +233,9 @@ def geojson2jsonld(cls, data: dict, dataset: str,
             if not is_url(str(identifier_)):
                 identifier_ = f"{ds_url}/items/{feature['id']}"  # noqa
 
-            # Include multiple geometry encodings
-            if feature.get('geometry') is not None:
-                jsonldify_geometry(feature)
-
             data['features'][i] = {
                 '@id': identifier_,
-                'type': 'schema:Place',
-                **feature.pop('properties'),
-                **feature
+                'type': 'schema:Place'
             }
 
     if data.get('timeStamp', False):
@@ -246,21 +248,14 @@ def geojson2jsonld(cls, data: dict, dataset: str,
         **data
     }
 
-    if identifier:
-        # Render jsonld template for single item
-        LOGGER.debug('Rendering JSON-LD item template')
-        content = render_j2_template(
-            cls.tpl_config, templates,
-            'collections/items/item.jsonld', ldjsonData)
-
+    if None in (template, identifier):
+        return ldjsonData
     else:
-        # Render jsonld template for /items
-        LOGGER.debug('Rendering JSON-LD items template')
-        content = render_j2_template(
-            cls.tpl_config, templates,
-            'collections/items/index.jsonld', ldjsonData)
-
-    return content
+        # Render jsonld template for single item with template configured
+        LOGGER.debug(f'Rendering JSON-LD template: {template}')
+        content = render_j2_template(cls.config, template, ldjsonData)
+        ldjsonData = json.loads(content)
+        return ldjsonData
 
 
 def jsonldify_geometry(feature: dict) -> None:
@@ -272,8 +267,6 @@ def jsonldify_geometry(feature: dict) -> None:
 
     :returns: None
     """
-
-    feature['type'] = 'schema:Place'
 
     geo = feature.get('geometry')
     geom = shape(geo)
@@ -291,11 +284,7 @@ def jsonldify_geometry(feature: dict) -> None:
     }
 
     # Schema geometry
-    try:
-        feature['schema:geo'] = geom2schemageo(geom)
-    except AttributeError:
-        msg = f'Unable to parse schema geometry for {feature["id"]}'
-        LOGGER.warning(msg)
+    feature['schema:geo'] = geom2schemageo(geom)
 
 
 def geom2schemageo(geom: shape) -> dict:

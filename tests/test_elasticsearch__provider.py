@@ -2,8 +2,8 @@
 #
 # Authors: Tom Kralidis <tomkralidis@gmail.com>
 #
-# Copyright (c) 2024 Tom Kralidis
-# Copyright (c) 2025 Francesco Bartoli
+# Copyright (c) 2020 Tom Kralidis
+# Copyright (c) 2024 Francesco Bartoli
 #
 # Permission is hereby granted, free of charge, to any person
 # obtaining a copy of this software and associated documentation
@@ -28,13 +28,11 @@
 #
 # =================================================================
 
-import json
-
-from pygeofilter.parsers.cql2_json import parse as parse_cql2_json
 import pytest
 
 from pygeoapi.provider.base import ProviderItemNotFoundError
 from pygeoapi.provider.elasticsearch_ import ElasticsearchProvider
+from pygeoapi.models.cql import CQLModel
 
 
 @pytest.fixture()
@@ -74,114 +72,90 @@ def config_cql():
 @pytest.fixture()
 def between():
     between_ = {
-        'op': 'between',
-        'args': [
-            {'property': 'properties.pop_max'},
-            [10000, 100000]
-        ]
+        "between": {
+            "value": {"property": "properties.pop_max"},
+            "lower": 10000,
+            "upper": 100000
+        }
     }
-    return parse_cql2_json(json.dumps(between_))
+    return CQLModel.parse_obj(between_)
 
 
 @pytest.fixture()
 def between_upper():
     between_ = {
-        'op': '<',
-        'args': [
-            {'property': 'properties.pop_max'},
-            100000
-        ]
+        "between": {
+            "value": {"property": "properties.pop_max"},
+            "upper": 100000
+        }
     }
-    return parse_cql2_json(json.dumps(between_))
+    return CQLModel.parse_obj(between_)
 
 
 @pytest.fixture()
 def between_lower():
     between_ = {
-        'op': '>',
-        'args': [
-            {'property': 'properties.pop_max'},
-            10000
-        ]
+        "between": {
+            "value": {"property": "properties.pop_max"},
+            "lower": 10000
+        }
     }
-    return parse_cql2_json(json.dumps(between_))
+    return CQLModel.parse_obj(between_)
 
 
 @pytest.fixture()
 def eq():
     eq_ = {
-        'op': '=',
-        'args': [
-            {'property': 'properties.featurecla'},
-            'Admin-0 capital'
+        "eq": [
+            {"property": "properties.featurecla"},
+            "Admin-0 capital"
         ]
     }
-    return parse_cql2_json(json.dumps(eq_))
+    return CQLModel.parse_obj(eq_)
 
 
 @pytest.fixture()
 def _and(eq, between):
     and_ = {
-        'op': 'and',
-        'args': [{
-            'op': 'between',
-            'args': [
-                {'property': 'properties.pop_max'},
-                [100000, 1000000]
-            ]
-        }, {
-            'op': '=',
-            'args': [
-                {'property': 'properties.featurecla'},
-                'Admin-0 capital'
-            ]
-        }]
+        "and": [
+            {
+                "between": {
+                    "value": {
+                        "property": "properties.pop_max"
+                    },
+                    "lower": 100000,
+                    "upper": 1000000
+                }
+            },
+            {
+                "eq": [
+                    {"property": "properties.featurecla"},
+                    "Admin-0 capital"
+                ]
+            }
+        ]
     }
-    return parse_cql2_json(json.dumps(and_))
+    return CQLModel.parse_obj(and_)
 
 
 @pytest.fixture()
 def intersects():
-    intersects = {
-        'op': 's_intersects',
-        'args': [
-            {'property': 'geometry'}, {
-                'type': 'Polygon',
-                'coordinates': [[
+    intersects = {"intersects": [
+        {"property": "geometry"},
+        {
+            "type": "Polygon",
+            "coordinates": [
+                [
                     [10.497565, 41.520355],
                     [10.497565, 43.308645],
                     [15.111823, 43.308645],
                     [15.111823, 41.520355],
                     [10.497565, 41.520355]
-                ]]
-            }
-        ]}
-    return parse_cql2_json(json.dumps(intersects))
-
-
-def test_domains(config):
-    p = ElasticsearchProvider(config)
-
-    domains, current = p.get_domains()
-
-    assert current
-
-    expected_properties = ['adm0cap', 'capalt', 'changed', 'checkme',
-                           'diffascii', 'geonameid', 'labelrank', 'latitude',
-                           'longitude', 'ls_match', 'megacity', 'min_zoom',
-                           'nameascii', 'namediff', 'natscale', 'pop_max',
-                           'pop_min', 'pop_other', 'rank_max', 'rank_min',
-                           'scalerank', 'worldcity']
-
-    assert sorted(domains.keys()) == expected_properties
-
-    assert len(domains['scalerank']) == 8
-
-    domains, current = p.get_domains(['scalerank'])
-
-    assert current
-
-    assert list(domains.keys()) == ['scalerank']
+                ]
+            ]
+        }
+    ]}
+    return CQLModel.parse_obj(intersects)
 
 
 def test_query(config):
@@ -249,22 +223,6 @@ def test_query(config):
     p = ElasticsearchProvider(config)
     results = p.query()
     assert len(results['features'][0]['properties']) == 1
-
-
-def test_query_q(config):
-    p = ElasticsearchProvider(config)
-
-    result = p.query(q='vatican')
-    assert len(result['features']) == 1
-
-    result = p.query(q='vatican,lazio')
-    assert len(result['features']) == 2
-
-    result = p.query(q='vatican lazio')
-    assert len(result['features']) == 0
-
-    result = p.query(q='holy see')
-    assert len(result['features']) == 1
 
 
 def test_query_ordered_properties(config_ordered_properties):

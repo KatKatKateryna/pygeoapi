@@ -5,13 +5,11 @@
 #          John A Stevenson <jostev@bgs.ac.uk>
 #          Colin Blackburn <colb@bgs.ac.uk>
 #          Francesco Bartoli <xbartolone@gmail.com>
-#          Bernhard Mallinger <bernhard.mallinger@eox.at>
 #
 # Copyright (c) 2019 Just van den Broecke
-# Copyright (c) 2025 Tom Kralidis
+# Copyright (c) 2024 Tom Kralidis
 # Copyright (c) 2022 John A Stevenson and Colin Blackburn
-# Copyright (c) 2025 Francesco Bartoli
-# Copyright (c) 2024 Bernhard Mallinger
+# Copyright (c) 2023 Francesco Bartoli
 #
 # Permission is hereby granted, free of charge, to any person
 # obtaining a copy of this software and associated documentation
@@ -50,15 +48,15 @@ from pygeofilter.parsers.ecql import parse
 
 from pygeoapi.api import API
 from pygeoapi.api.itemtypes import (
-    get_collection_items, get_collection_item, manage_collection_item
+    get_collection_items, get_collection_item, post_collection_items
 )
 from pygeoapi.provider.base import (
     ProviderConnectionError,
     ProviderItemNotFoundError,
     ProviderQueryError
 )
-from pygeoapi.provider.sql import PostgreSQLProvider
-import pygeoapi.provider.sql as postgresql_provider_module
+from pygeoapi.provider.postgresql import PostgreSQLProvider
+import pygeoapi.provider.postgresql as postgresql_provider_module
 
 from pygeoapi.util import (yaml_load, geojson_to_geom,
                            get_transform_from_crs, get_crs_from_uri)
@@ -81,8 +79,8 @@ def config():
                  'search_path': ['osm', 'public']
                  },
         'options': {
-            'connect_timeout': 10
-        },
+                        'connect_timeout': 10
+                   },
         'id_field': 'osm_id',
         'table': 'hotosm_bdi_waterways',
         'geom_field': 'foo_geom'
@@ -101,31 +99,12 @@ def config_types():
                  'search_path': ['public']
                  },
         'options': {
-            'connect_timeout': 10
-        },
+                        'connect_timeout': 10
+                   },
         'id_field': 'id',
         'table': 'foo',
         'geom_field': 'the_geom'
     }
-
-
-@pytest.fixture()
-def data():
-    return json.dumps({
-        'type': 'Feature',
-        'geometry': {
-            'type': 'MultiLineString',
-            'coordinates': [
-                [[100.0, 0.0], [101.0, 0.0]],
-                [[101.0, 0.0], [100.0, 1.0]],
-            ]
-        },
-        'properties': {
-            'identifier': 123,
-            'name': 'Flowy McFlow',
-            'waterway': 'river'
-        }
-    })
 
 
 @pytest.fixture()
@@ -381,18 +360,6 @@ def test_query_cql_properties_bbox_filters(config):
     assert ids == expected_ids
 
 
-def test_bbox_is_same_as_cql(config):
-    provider = PostgreSQLProvider(config)
-
-    bbox = [30.560389, -3.134991, 30.604849, -3.061970]
-    fc_bbox = provider.query(bbox=bbox)
-
-    bbox_cql = parse('BBOX(foo_geom, {}, {}, {}, {})'.format(*bbox))
-    fc_bbox_cql = provider.query(filterq=bbox_cql)
-
-    assert fc_bbox == fc_bbox_cql
-
-
 def test_get_fields_types(config_types):
     provider = PostgreSQLProvider(config_types)
 
@@ -448,7 +415,7 @@ def test_instantiation(config):
     ({'table': 'bad_table'}, ProviderQueryError,
      'Table.*not found in schema.*'),
     ({'data': {'bad': 'data'}}, ProviderConnectionError,
-     r'Could not connect to postgresql\+psycopg2:\/\/:5432 \(password hidden\).'),  # noqa
+     r'Could not connect to postgresql\+psycopg2:\/\/:5432 \(password hidden\).'), # noqa
     ({'id_field': 'bad_id'}, ProviderQueryError,
      r'No such id_field column \(bad_id\) on osm.hotosm_bdi_waterways.'),
 ])
@@ -553,7 +520,7 @@ def test_get_collection_items_postgresql_cql_invalid_filter_language(pg_api_):
 
     # Act
     req = mock_api_request({
-        'filter-lang': 'cql-jsonfoo',
+        'filter-lang': 'cql-json',  # Only cql-text is valid for GET
         'filter': cql_query
     })
     rsp_headers, code, response = get_collection_items(
@@ -589,34 +556,19 @@ def test_get_collection_items_postgresql_cql_bad_cql(pg_api_, bad_cql):
     assert code == HTTPStatus.BAD_REQUEST
     error_response = json.loads(response)
     assert error_response['code'] == 'InvalidParameterValue'
-    assert error_response['description'] == 'Bad CQL text'
+    assert error_response['description'] == f'Bad CQL string : {bad_cql}'
 
 
-def test_get_collection_items_postgresql_cql_json(pg_api_):
+def test_post_collection_items_postgresql_cql(pg_api_):
     """
     Test for PostgreSQL CQL - requires local PostgreSQL with appropriate
     data.  See pygeoapi/provider/postgresql.py for details.
     """
     # Arrange
-    cql = {
-        'op': 'and',
-        'args': [{
-            'op': 'between',
-            'args': [
-                {'property': 'osm_id'},
-                [80800000, 80900000]
-            ]
-        }, {
-            # FIXME: the below query is in CQL style, not CQL2
-            # needs a fix in pygeofilter
-            # 'op': 'isNull',
-            # 'args': [
-            #    {'property': 'name'}
-            # ]
-            'op': 'isNull',
-            'args': {'property': 'name'}
-        }]
-    }
+    cql = {"and": [{"between": {"value": {"property": "osm_id"},
+                                "lower": 80800000,
+                                "upper": 80900000}},
+                   {"isNull": {"property": "name"}}]}
     # werkzeug requests use a value of CONTENT_TYPE 'application/json'
     # to create Content-Type in the Request object. So here we need to
     # overwrite the default CONTENT_TYPE with the required one.
@@ -627,7 +579,7 @@ def test_get_collection_items_postgresql_cql_json(pg_api_):
     req = mock_api_request({
         'filter-lang': 'cql-json'
     }, data=cql, **headers)
-    rsp_headers, code, response = get_collection_items(
+    rsp_headers, code, response = post_collection_items(
         pg_api_, req, 'hot_osm_waterways')
 
     # Assert
@@ -637,7 +589,7 @@ def test_get_collection_items_postgresql_cql_json(pg_api_):
     assert ids == expected_ids
 
 
-def test_get_collection_items_postgresql_cql_json_invalid_filter_language(pg_api_):  # noqa
+def test_post_collection_items_postgresql_cql_invalid_filter_language(pg_api_):
     """
     Test for PostgreSQL CQL - requires local PostgreSQL with appropriate
     data.  See pygeoapi/provider/postgresql.py for details.
@@ -653,14 +605,14 @@ def test_get_collection_items_postgresql_cql_json_invalid_filter_language(pg_api
     req = mock_api_request({
         'filter-lang': 'cql-text'  # Only cql-json is valid for POST
     }, data=cql, **headers)
-    rsp_headers, code, response = get_collection_items(
+    rsp_headers, code, response = post_collection_items(
         pg_api_, req, 'hot_osm_waterways')
 
     # Assert
     assert code == HTTPStatus.BAD_REQUEST
     error_response = json.loads(response)
     assert error_response['code'] == 'InvalidParameterValue'
-    assert error_response['description'] == 'Bad CQL JSON'
+    assert error_response['description'] == 'Invalid filter language'
 
 
 @pytest.mark.parametrize("bad_cql", [
@@ -669,7 +621,7 @@ def test_get_collection_items_postgresql_cql_json_invalid_filter_language(pg_api
     # At some point this may return UnexpectedEOF
     '{"in": {"value": {"property": "id"}, "list": [1, 2}}'
 ])
-def test_get_collection_items_postgresql_cql_json_bad_cql(pg_api_, bad_cql):
+def test_post_collection_items_postgresql_cql_bad_cql(pg_api_, bad_cql):
     """
     Test for PostgreSQL CQL - requires local PostgreSQL with appropriate
     data.  See pygeoapi/provider/postgresql.py for details.
@@ -683,14 +635,14 @@ def test_get_collection_items_postgresql_cql_json_bad_cql(pg_api_, bad_cql):
     req = mock_api_request({
         'filter-lang': 'cql-json'
     }, data=bad_cql, **headers)
-    rsp_headers, code, response = get_collection_items(
+    rsp_headers, code, response = post_collection_items(
         pg_api_, req, 'hot_osm_waterways')
 
     # Assert
     assert code == HTTPStatus.BAD_REQUEST
     error_response = json.loads(response)
     assert error_response['code'] == 'InvalidParameterValue'
-    assert error_response['description'] == 'Bad CQL JSON'
+    assert error_response['description'].startswith('Bad CQL string')
 
 
 def test_get_collection_items_postgresql_crs(pg_api_):
@@ -843,44 +795,3 @@ def test_get_collection_items_postgresql_automap_naming_conflicts(pg_api_):
     assert code == HTTPStatus.OK
     features = json.loads(response).get('features')
     assert len(features) == 0
-
-
-def test_transaction_basic_workflow(pg_api_, data):
-    # create
-    req = mock_api_request(data=data)
-    headers, code, content = manage_collection_item(
-        pg_api_, req, action='create', dataset='hot_osm_waterways')
-    assert code == HTTPStatus.CREATED
-
-    # update
-    data_parsed = json.loads(data)
-    new_name = data_parsed['properties']['name'] + ' Flow'
-    data_parsed['properties']['name'] = new_name
-    req = mock_api_request(data=json.dumps(data_parsed))
-    headers, code, content = manage_collection_item(
-        pg_api_, req, action='update', dataset='hot_osm_waterways',
-        identifier=123)
-    assert code == HTTPStatus.NO_CONTENT
-
-    # verify update
-    req = mock_api_request()
-    headers, code, content = get_collection_item(
-        pg_api_, req, 'hot_osm_waterways', 123)
-    assert json.loads(content)['properties']['name'] == new_name
-
-    # delete
-    req = mock_api_request(data=data)
-    headers, code, content = manage_collection_item(
-        pg_api_, req, action='delete', dataset='hot_osm_waterways',
-        identifier=123)
-    assert code == HTTPStatus.OK
-
-
-def test_transaction_create_handles_invalid_input_data(pg_api_, data):
-    data_parsed = json.loads(data)
-    data_parsed['properties']['invalid-column'] = 'foo'
-
-    req = mock_api_request(data=json.dumps(data_parsed))
-    headers, code, content = manage_collection_item(
-        pg_api_, req, action='create', dataset='hot_osm_waterways')
-    assert 'generic error' in content

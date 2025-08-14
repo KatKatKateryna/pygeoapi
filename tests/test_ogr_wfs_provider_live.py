@@ -5,7 +5,7 @@
 # Authors: Tom Kralidis <tomkralidis@gmail.com>
 #
 # Copyright (c) 2019 Just van den Broecke
-# Copyright (c) 2025 Francesco Bartoli
+# Copyright (c) 2020 Francesco Bartoli
 # Copyright (c) 2022 Tom Kralidis
 #
 # Permission is hereby granted, free of charge, to any person
@@ -140,7 +140,7 @@ def config_geosol_gs_WFS():
              'http://www.opengis.net/def/crs/OGC/1.3/CRS84',
              'http://www.opengis.net/def/crs/EPSG/0/32632'
          ],
-        'storageCrs': 'http://www.opengis.net/def/crs/EPSG/0/32632',
+        'storageCRS': 'http://www.opengis.net/def/crs/EPSG/0/32632',
         'id_field': 'gml_id',
         'layer': 'unesco:Unesco_point',
     }

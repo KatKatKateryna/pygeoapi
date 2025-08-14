@@ -66,31 +66,17 @@ class DatabaseConnection:
         """Initialize the connection pool for the class
            Lock is implemented before function call at __init__"""
         dsn = cls._make_dsn(conn_dict)
-
-        connect_kwargs = {
-            'dsn': dsn,
-            'min': oracle_pool_min,
-            'max': oracle_pool_max,
-            'increment': 1
-        }
-
         # Create the pool
-        if conn_dict.get("external_auth") == "wallet":
-            # If Auth is via Wallet you need to save a wallet under
-            # the directory returned by this bash command if apache is used
-            # cat /etc/passwd |grep apache
-            # except another directory is specified in the sqlnet.ora file
-            LOGGER.debug("Connection pool from wallet.")
-            connect_kwargs["externalauth"] = True
-            connect_kwargs["homogeneous"] = False
 
-        else:
-            LOGGER.debug("Connection pool from user and password.")
-            connect_kwargs["user"] = conn_dict["user"]
-            connect_kwargs["password"] = conn_dict["password"]
-
-        p = oracledb.create_pool(**connect_kwargs)
-        LOGGER.debug("Connection pool created successfully")
+        p = oracledb.create_pool(
+                    user=conn_dict["user"],
+                    password=conn_dict["password"],
+                    dsn=dsn,
+                    min=oracle_pool_min,
+                    max=oracle_pool_max,
+                    increment=1,
+                )
+        LOGGER.debug("Connection pool created successfully.")
 
         return p
 
@@ -449,12 +435,12 @@ class OracleProvider(BaseProvider):
         """
         LOGGER.debug("Get available fields/properties")
 
-        if not self._fields:
+        if not self.fields:
             with DatabaseConnection(
                 self.conn_dic, self.table, properties=self.properties
             ) as db:
-                self._fields = db.fields
-        return self._fields
+                self.fields = db.fields
+        return self.fields
 
     def _get_where_clauses(
         self,
@@ -613,38 +599,6 @@ class OracleProvider(BaseProvider):
 
         return srid
 
-    def _process_query_with_sql_manipulator_sup(
-        self, db, sql_query, bind_variables, extra_params, **query_args
-    ):
-        """
-        Apply the SQL manipulation plugin to process the SQL query.
-
-        :param db: Database connection instance
-        :param sql_query: The SQL query to process
-        :param bind_variables: Query bind variables
-        :param extra_params: Additional parameters for manipulation
-        :param query_args: Other dynamic arguments required for processing
-        :return: Processed SQL query and bind variables
-        """
-        if self.sql_manipulator:
-            LOGGER.debug(f"sql_manipulator: {self.sql_manipulator}")
-            manipulation_class = _class_factory(self.sql_manipulator)
-
-            # Pass all arguments to the process_query method
-            sql_query, bind_variables = manipulation_class.process_query(
-                db=db,
-                sql_query=sql_query,
-                bind_variables=bind_variables,
-                sql_manipulator_options=self.sql_manipulator_options,
-                **query_args,
-                extra_params=extra_params,
-            )
-
-        for placeholder in ["#HINTS#", "#JOIN#", "#WHERE#"]:
-            sql_query = sql_query.replace(placeholder, "")
-
-        return sql_query, bind_variables
-
     def query(
         self,
         offset=0,
@@ -679,19 +633,6 @@ class OracleProvider(BaseProvider):
 
         :returns: GeoJSON FeaturesCollection
         """
-        LOGGER.debug(f"properties contains: {properties}")
-
-        # NOTE: properties contains field keys plus extra params
-        #       need to split them up here
-        filtered_properties = []
-        extra_params = {}
-        for (key, value) in properties:
-            if key in self.fields.keys():
-                filtered_properties.append((key, value))
-            else:
-                extra_params[key] = value
-
-        properties = filtered_properties
 
         # Check mandatory filter properties
         property_dict = dict(properties)
@@ -727,36 +668,9 @@ class OracleProvider(BaseProvider):
             # because of getFields ...
             sql_query = f"SELECT COUNT(1) AS hits \
                             FROM {self.table} \
-                            {where_dict['clause']} #WHERE#"
-
-            # Assign where_dict["properties"] to bind_variables
-            bind_variables = {**where_dict["properties"]}
-
-            # Default values for the process_query function (sql_manipulator)
-            query_args = {
-                "offset": offset,
-                "limit": limit,
-                "resulttype": resulttype,
-                "bbox": bbox,
-                "datetime_": datetime_,
-                "properties": properties,
-                "sortby": sortby,
-                "skip_geometry": skip_geometry,
-                "select_properties": select_properties,
-                "crs_transform_spec": crs_transform_spec,
-                "q": q,
-                "language": language,
-                "filterq": filterq,
-            }
-
-            # Apply the SQL manipulation plugin
-            extra_params["geom"] = self.geom
-            sql_query, bind_variables = self._process_query_with_sql_manipulator_sup(   # noqa: E501
-                db, sql_query, bind_variables, extra_params, **query_args
-            )
-
+                            {where_dict['clause']}"
             try:
-                cursor.execute(sql_query, bind_variables)
+                cursor.execute(sql_query, where_dict["properties"])
             except oracledb.Error as err:
                 LOGGER.error(
                     f"Error executing sql_query: {sql_query}: {err}"
@@ -854,10 +768,35 @@ class OracleProvider(BaseProvider):
             # Create dictionary for sql bind variables
             bind_variables = {**where_dict["properties"], **paging_bind}
 
-            # Apply the SQL manipulation plugin
-            sql_query, bind_variables = self._process_query_with_sql_manipulator_sup(   # noqa: E501
-                db, sql_query, bind_variables, extra_params, **query_args
-            )
+            # SQL manipulation plugin
+            if self.sql_manipulator:
+                LOGGER.debug("sql_manipulator: " + self.sql_manipulator)
+                manipulation_class = _class_factory(self.sql_manipulator)
+                sql_query, bind_variables = manipulation_class.process_query(
+                    db,
+                    sql_query,
+                    bind_variables,
+                    self.sql_manipulator_options,
+                    offset,
+                    limit,
+                    resulttype,
+                    bbox,
+                    datetime_,
+                    properties,
+                    sortby,
+                    skip_geometry,
+                    select_properties,
+                    crs_transform_spec,
+                    q,
+                    language,
+                    filterq,
+                )
+
+            # Clean up placeholders that aren't used by the
+            # manipulation class.
+            sql_query = sql_query.replace("#HINTS#", "")
+            sql_query = sql_query.replace("#JOIN#", "")
+            sql_query = sql_query.replace("#WHERE#", "")
 
             LOGGER.debug(f"SQL Query: {sql_query}")
             LOGGER.debug(f"Bind variables: {bind_variables}")

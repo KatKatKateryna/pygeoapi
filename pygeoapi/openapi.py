@@ -5,7 +5,7 @@
 # Authors: Ricardo Garcia Silva <ricardo.garcia.silva@geobeyond.it>
 #
 # Copyright (c) 2024 Tom Kralidis
-# Copyright (c) 2025 Francesco Bartoli
+# Copyright (c) 2022 Francesco Bartoli
 # Copyright (c) 2023 Ricardo Garcia Silva
 #
 # Permission is hereby granted, free of charge, to any person
@@ -134,95 +134,6 @@ def gen_response_object(description: str, media_type: str,
     return response
 
 
-def gen_contact(cfg: dict) -> dict:
-    """
-    Generates an OpenAPI contact object with OGC extensions
-    based on OGC API - Records contact
-
-    :param cfg: `dict` of configuration
-
-    :returns: `dict` of OpenAPI contact object
-    """
-
-    has_addresses = False
-    has_phones = False
-
-    contact = {
-        'name': cfg['metadata']['provider']['name']
-    }
-
-    for key in ['url', 'email']:
-        if key in cfg['metadata']['provider']:
-            contact[key] = cfg['metadata']['provider'][key]
-
-    contact['x-ogc-serviceContact'] = {
-        'name': cfg['metadata']['contact']['name'],
-        'addresses': []
-    }
-
-    if 'position' in cfg['metadata']['contact']:
-        contact['x-ogc-serviceContact']['position'] = cfg['metadata']['contact']['position']  # noqa
-
-    if any(address in ['address', 'city', 'stateorprovince', 'postalcode', 'country'] for address in cfg['metadata']['contact']):  # noqa
-        has_addresses = True
-
-    if has_addresses:
-        address = {}
-        if 'address' in cfg['metadata']['contact']:
-            address['deliveryPoint'] = [cfg['metadata']['contact']['address']]
-
-        if 'city' in cfg['metadata']['contact']:
-            address['city'] = cfg['metadata']['contact']['city']
-
-        if 'stateorprovince' in cfg['metadata']['contact']:
-            address['administrativeArea'] = cfg['metadata']['contact']['stateorprovince']  # noqa
-
-        if 'postalCode' in cfg['metadata']['contact']:
-            address['administrativeArea'] = cfg['metadata']['contact']['postalCode']  # noqa
-
-        if 'country' in cfg['metadata']['contact']:
-            address['administrativeArea'] = cfg['metadata']['contact']['country']  # noqa
-
-        contact['x-ogc-serviceContact']['addresses'].append(address)
-
-    if any(phone in ['phone', 'fax'] for phone in cfg['metadata']['contact']):
-        has_phones = True
-        contact['x-ogc-serviceContact']['phones'] = []
-
-    if has_phones:
-        if 'phone' in cfg['metadata']['contact']:
-            contact['x-ogc-serviceContact']['phones'].append({
-                'type': 'main', 'value': cfg['metadata']['contact']['phone']
-            })
-
-        if 'fax' in cfg['metadata']['contact']:
-            contact['x-ogc-serviceContact']['phones'].append({
-                'type': 'fax', 'value': cfg['metadata']['contact']['fax']
-            })
-
-    if 'email' in cfg['metadata']['contact']:
-        contact['x-ogc-serviceContact']['emails'] = [{
-            'value': cfg['metadata']['contact']['email']
-        }]
-
-    if 'url' in cfg['metadata']['contact']:
-        contact['x-ogc-serviceContact']['links'] = [{
-            'type': 'text/html',
-            'href': cfg['metadata']['contact']['url']
-        }]
-
-    if 'instructions' in cfg['metadata']['contact']:
-        contact['x-ogc-serviceContact']['contactInstructions'] = cfg['metadata']['contact']['instructions']  # noqa
-
-    if 'hours' in cfg['metadata']['contact']:
-        contact['x-ogc-serviceContact']['hoursOfService'] = cfg['metadata']['contact']['hours']  # noqa
-
-    if 'role' in cfg['metadata']['contact']:
-        contact['x-ogc-serviceContact']['hoursOfService'] = cfg['metadata']['contact']['role']  # noqa
-
-    return contact
-
-
 def get_oas_30(cfg: dict, fail_on_invalid_collection: bool = True) -> dict:
     """
     Generates an OpenAPI 3.0 Document
@@ -256,7 +167,11 @@ def get_oas_30(cfg: dict, fail_on_invalid_collection: bool = True) -> dict:
         'x-keywords': l10n.translate(cfg['metadata']['identification']['keywords'], locale_),  # noqa
         'termsOfService':
             cfg['metadata']['identification']['terms_of_service'],
-        'contact': gen_contact(cfg),
+        'contact': {
+            'name': cfg['metadata']['provider']['name'],
+            'url': cfg['metadata']['provider']['url'],
+            'email': cfg['metadata']['contact']['email']
+        },
         'license': {
             'name': cfg['metadata']['license']['name'],
             'url': cfg['metadata']['license']['url']
@@ -410,7 +325,9 @@ def get_oas_30(cfg: dict, fail_on_invalid_collection: bool = True) -> dict:
                     'language': {
                         'description': 'the language used for the title and description', # noqa
                         'type': 'string',
-                        'default': 'en'
+                        'default': [
+                            'en'
+                        ]
                     },
                     'type': {
                         'description': 'the data type of the queryable', # noqa
@@ -550,148 +467,142 @@ def get_oas_30(cfg: dict, fail_on_invalid_collection: bool = True) -> dict:
         schema_dict = get_config_schema()
         oas['definitions'] = schema_dict['definitions']
         LOGGER.debug('Adding admin endpoints')
-        oas['paths'].update(get_admin(cfg))
+        oas['paths'].update(get_admin())
 
     return oas
 
 
 def get_oas_30_parameters(cfg: dict, locale_: str):
     server_locales = l10n.get_locales(cfg)
-
-    oas_30_parameters = {
-        'f': {
-            'name': 'f',
-            'in': 'query',
-            'description': 'The optional f parameter indicates the output format which the server shall provide as part of the response document.  The default format is GeoJSON.',  # noqa
-            'required': False,
-            'schema': {
-                'type': 'string',
-                'enum': ['json', 'html', 'jsonld'],
-                'default': 'json'
+    return {
+            'f': {
+                'name': 'f',
+                'in': 'query',
+                'description': 'The optional f parameter indicates the output format which the server shall provide as part of the response document.  The default format is GeoJSON.',  # noqa
+                'required': False,
+                'schema': {
+                    'type': 'string',
+                    'enum': ['json', 'html', 'jsonld'],
+                    'default': 'json'
+                },
+                'style': 'form',
+                'explode': False
             },
-            'style': 'form',
-            'explode': False
-        },
-        'lang': {
-            'name': 'lang',
-            'in': 'query',
-            'description': 'The optional lang parameter instructs the server return a response in a certain language, if supported.  If the language is not among the available values, the Accept-Language header language will be used if it is supported. If the header is missing, the default server language is used. Note that providers may only support a single language (or often no language at all), that can be different from the server language.  Language strings can be written in a complex (e.g. "fr-CA,fr;q=0.9,en-US;q=0.8,en;q=0.7"), simple (e.g. "de") or locale-like (e.g. "de-CH" or "fr_BE") fashion.',  # noqa
-            'required': False,
-            'schema': {
-                'type': 'string',
-                'enum': [l10n.locale2str(sl) for sl in server_locales],
-                'default': l10n.locale2str(locale_)
-            }
-        },
-        'skipGeometry': {
-            'name': 'skipGeometry',
-            'in': 'query',
-            'description': 'This option can be used to skip response geometries for each feature.',  # noqa
-            'required': False,
-            'style': 'form',
-            'explode': False,
-            'schema': {
-                'type': 'boolean',
-                'default': False
-            }
-        },
-        'crs': {
-            'name': 'crs',
-            'in': 'query',
-            'description': 'Indicates the coordinate reference system for the results.',  # noqa
-            'style': 'form',
-            'required': False,
-            'explode': False,
-            'schema': {
-                'format': 'uri',
-                'type': 'string'
-            }
-        },
-        'bbox': {
-            'name': 'bbox',
-            'in': 'query',
-            'description': 'Only features that have a geometry that intersects the bounding box are selected.'  # noqa
-                           'The bounding box is provided as four or six numbers, depending on whether the '  # noqa
-                           'coordinate reference system includes a vertical axis (height or depth).',  # noqa
-            'required': False,
-            'style': 'form',
-            'explode': False,
-            'schema': {
-                'type': 'array',
-                'minItems': 4,
-                'maxItems': 6,
-                'items': {
-                    'type': 'number'
+            'lang': {
+                'name': 'lang',
+                'in': 'query',
+                'description': 'The optional lang parameter instructs the server return a response in a certain language, if supported.  If the language is not among the available values, the Accept-Language header language will be used if it is supported. If the header is missing, the default server language is used. Note that providers may only support a single language (or often no language at all), that can be different from the server language.  Language strings can be written in a complex (e.g. "fr-CA,fr;q=0.9,en-US;q=0.8,en;q=0.7"), simple (e.g. "de") or locale-like (e.g. "de-CH" or "fr_BE") fashion.',  # noqa
+                'required': False,
+                'schema': {
+                    'type': 'string',
+                    'enum': [l10n.locale2str(sl) for sl in server_locales],
+                    'default': l10n.locale2str(locale_)
                 }
-            }
-        },
-        'bbox-crs': {
-            'name': 'bbox-crs',
-            'in': 'query',
-            'description': 'Indicates the coordinate reference system for the given bbox coordinates.',  # noqa
-            'style': 'form',
-            'required': False,
-            'explode': False,
-            'schema': {
-                'format': 'uri',
-                'type': 'string'
-            }
-        },
-        # FIXME: This is not compatible with the bbox-crs definition in
-        #        OGCAPI Features Part 2!
-        #        We need to change the mapscript provider and
-        #        get_collection_map() method in the API!
-        #        So this is for de map-provider only.
-        'bbox-crs-epsg': {
-            'name': 'bbox-crs',
-            'in': 'query',
-            'description': 'Indicates the EPSG for the given bbox coordinates.',  # noqa
-            'required': False,
-            'style': 'form',
-            'explode': False,
-            'schema': {
-                'type': 'integer',
-                'default': 4326
-            }
-        },
-        'offset': {
-            'name': 'offset',
-            'in': 'query',
-            'description': 'The optional offset parameter indicates the index within the result set from which the server shall begin presenting results in the response document.  The first element has an index of 0 (default).',  # noqa
-            'required': False,
-            'schema': {
-                'type': 'integer',
-                'minimum': 0,
-                'default': 0
             },
-            'style': 'form',
-            'explode': False
-        },
-        'vendorSpecificParameters': {
-            'name': 'vendorSpecificParameters',
-            'in': 'query',
-            'description': 'Additional "free-form" parameters that are not explicitly defined',  # noqa
-            'schema': {
-                'type': 'object',
-                'additionalProperties': True
+            'skipGeometry': {
+                'name': 'skipGeometry',
+                'in': 'query',
+                'description': 'This option can be used to skip response geometries for each feature.',  # noqa
+                'required': False,
+                'style': 'form',
+                'explode': False,
+                'schema': {
+                    'type': 'boolean',
+                    'default': False
+                }
             },
-            'style': 'form'
-        },
-        'resourceId': {
-            'name': 'resourceId',
-            'in': 'path',
-            'description': 'Configuration resource identifier',
-            'required': True,
-            'schema': {
-                'type': 'string'
-             }
+            'crs': {
+                'name': 'crs',
+                'in': 'query',
+                'description': 'Indicates the coordinate reference system for the results.',  # noqa
+                'style': 'form',
+                'required': False,
+                'explode': False,
+                'schema': {
+                    'format': 'uri',
+                    'type': 'string'
+                }
+            },
+            'bbox': {
+                'name': 'bbox',
+                'in': 'query',
+                'description': 'Only features that have a geometry that intersects the bounding box are selected.'  # noqa
+                               'The bounding box is provided as four or six numbers, depending on whether the '  # noqa
+                               'coordinate reference system includes a vertical axis (height or depth).',  # noqa
+                'required': False,
+                'style': 'form',
+                'explode': False,
+                'schema': {
+                    'type': 'array',
+                    'minItems': 4,
+                    'maxItems': 6,
+                    'items': {
+                        'type': 'number'
+                    }
+                }
+            },
+            'bbox-crs': {
+                'name': 'bbox-crs',
+                'in': 'query',
+                'description': 'Indicates the coordinate reference system for the given bbox coordinates.',  # noqa
+                'style': 'form',
+                'required': False,
+                'explode': False,
+                'schema': {
+                    'format': 'uri',
+                    'type': 'string'
+                }
+            },
+            # FIXME: This is not compatible with the bbox-crs definition in
+            #        OGCAPI Features Part 2!
+            #        We need to change the mapscript provider and
+            #        get_collection_map() method in the API!
+            #        So this is for de map-provider only.
+            'bbox-crs-epsg': {
+                'name': 'bbox-crs',
+                'in': 'query',
+                'description': 'Indicates the EPSG for the given bbox coordinates.',  # noqa
+                'required': False,
+                'style': 'form',
+                'explode': False,
+                'schema': {
+                    'type': 'integer',
+                    'default': 4326
+                }
+            },
+            'offset': {
+                'name': 'offset',
+                'in': 'query',
+                'description': 'The optional offset parameter indicates the index within the result set from which the server shall begin presenting results in the response document.  The first element has an index of 0 (default).',  # noqa
+                'required': False,
+                'schema': {
+                    'type': 'integer',
+                    'minimum': 0,
+                    'default': 0
+                },
+                'style': 'form',
+                'explode': False
+            },
+            'vendorSpecificParameters': {
+                'name': 'vendorSpecificParameters',
+                'in': 'query',
+                'description': 'Additional "free-form" parameters that are not explicitly defined',  # noqa
+                'schema': {
+                    'type': 'object',
+                    'additionalProperties': True
+                },
+                'style': 'form'
+            },
+            'resourceId': {
+                'name': 'resourceId',
+                'in': 'path',
+                'description': 'Configuration resource identifier',
+                'required': True,
+                'schema': {
+                    'type': 'string'
+                 }
+            }
         }
-    }
-    if len(list(cfg['resources'].keys())) > 0:
-        oas_30_parameters['resourceId']['schema']['default'] = list(
-            cfg['resources'].keys()
-        )[0]
-    return oas_30_parameters
 
 
 def get_visible_collections(cfg: dict) -> dict:
@@ -713,24 +624,11 @@ def get_config_schema():
         return yaml_load(fh2)
 
 
-def get_admin(cfg: dict) -> dict:
+def get_admin():
 
     schema_dict = get_config_schema()
 
     paths = {}
-
-    res_eg_key = next(iter(cfg['resources']))
-    res_eg = {
-        res_eg_key: cfg['resources'][res_eg_key]
-    }
-    if 'extents' in res_eg[res_eg_key]:
-        res_eg_eg_key = 'extents'
-    elif 'type' in res_eg[res_eg_key]:
-        res_eg_eg_key = 'type'
-
-    res_eg[res_eg_key]['patch_example'] = {
-        res_eg_eg_key: res_eg[res_eg_key][res_eg_eg_key]
-    }
 
     paths['/admin/config'] = {
         'get': {
@@ -762,7 +660,6 @@ def get_admin(cfg: dict) -> dict:
                 'description': 'Updates admin configuration',
                 'content': {
                     'application/json': {
-                        'example': cfg,
                         'schema': schema_dict
                     }
                 },
@@ -783,7 +680,6 @@ def get_admin(cfg: dict) -> dict:
                 'description': 'Updates admin configuration',
                 'content': {
                     'application/json': {
-                        'example': {'metadata': cfg['metadata']},
                         'schema': schema_dict
                     }
                 },
@@ -826,7 +722,6 @@ def get_admin(cfg: dict) -> dict:
                 'description': 'Adds resource to configuration',
                 'content': {
                     'application/json': {
-                        'example': {'new-collection': cfg['resources'][res_eg_key]}, # noqa
                         'schema': schema_dict['properties']['resources']['patternProperties']['^.*$']  # noqa
                     }
                 },
@@ -873,7 +768,6 @@ def get_admin(cfg: dict) -> dict:
                 'description': 'Updates admin configuration resource',
                 'content': {
                     'application/json': {
-                        'example': res_eg[res_eg_key],
                         'schema': schema_dict['properties']['resources']['patternProperties']['^.*$']  # noqa
                     }
                 },
@@ -897,7 +791,6 @@ def get_admin(cfg: dict) -> dict:
                 'description': 'Updates admin configuration resource',
                 'content': {
                     'application/json': {
-                        'example': res_eg[res_eg_key]['patch_example'],
                         'schema': schema_dict['properties']['resources']['patternProperties']['^.*$']  # noqa
                     }
                 },
@@ -1009,17 +902,6 @@ def load_openapi_document() -> dict:
     """
 
     pygeoapi_openapi = os.environ.get('PYGEOAPI_OPENAPI')
-
-    if pygeoapi_openapi is None:
-        msg = 'PYGEOAPI_OPENAPI environment not set'
-        LOGGER.error(msg)
-        raise RuntimeError(msg)
-
-    if not os.path.exists(pygeoapi_openapi):
-        msg = (f'OpenAPI document {pygeoapi_openapi} does not exist.  '
-               'Please generate before starting pygeoapi')
-        LOGGER.error(msg)
-        raise RuntimeError(msg)
 
     with open(pygeoapi_openapi, encoding='utf8') as ff:
         if pygeoapi_openapi.endswith(('.yaml', '.yml')):

@@ -8,15 +8,6 @@ Codebase
 
 The pygeoapi codebase exists at https://github.com/geopython/pygeoapi.
 
-Pull Requests and GitHub Actions
---------------------------------
-
-A given GitHub Pull Request is evaluated against the following GitHub actions:
-
-- main: mainline testing harness (as defined in ``tests``)
-- flake8: code linting
-- docs: documentation updates (for files updated in ``docs/**.rst``)
-- vulnerabilities: Trivy vulnerability scanning
 
 Testing
 -------
@@ -31,77 +22,43 @@ Tests can be run locally as part of development workflow.  They are also run on 
 To run all tests, simply run ``pytest`` in the repository.  To run a specific test file,
 run ``pytest tests/api/test_itemtypes.py``, for example.
 
-Some provider tests are subject to external service provisioning and setup (i.e Elasticsearch,
-PostgreSQL).  See the `GitHub Action main workflow <https://github.com/geopython/pygeoapi/blob/master/.github/workflows/main.yml>`_
-to review the setups taken in order to run provider tests requiring additional infrastructure.
 
-.. _pre-commit:
+CQL extension lifecycle
+-----------------------
 
-Linting
--------
+Limitations
+^^^^^^^^^^^
 
-pygeoapi follows PEP8 for linting Python source code.  All commits and GitHub Pull Requests
-perform ``flake8`` linting compliance prior to approval and/or merge into the codebase.  Running linting
-compliance prior to submitting a GitHub Pull Request is recommended.
+This workflow is valid only for the `CQL-JSON` format.
 
-Using flake8
-^^^^^^^^^^^^
+Schema
+^^^^^^
 
-Simply running `flake8` against the repository tree will assess the code for linting compliance.
+The Common Query Language (CQL) is the part 3 of the standard OGC API - Features. This extension has its specification available at
+`OGC API - Features - Part 3: Filtering and the Common Query Language (CQL) <https://portal.ogc.org/files/96288>`_ and the schema exists in development at
+`cql.json <https://portal.ogc.org/files/96288#cql-json-schema>`_.
 
-.. note::
-
-   Ensure flake8 is installed (``pip3 install flake8`` or ``pip3 install -r requirements.txt``)
-
-Using pre-commit
+Model generation
 ^^^^^^^^^^^^^^^^
 
-You may optionally use `pre-commit`_ in order to check for linting and other static issues
-before committing changes. Pygeoapi's repo includes a ``.pre-commit.yml``
-file, check the pre-commit docs on how to set it up - in a nutshell:
+pygeoapi uses a class-based Python model interface to translate the schema into Python objects defined by `pydantic <https://docs.pydantic.dev/>`_ models.
+The model is generated with the pre-processing of the schema through the utility ``datamodel-codegen``, which is part
+of the `datamodel-code-generator <https://koxudaxi.github.io/datamodel-code-generator/>`_ package:
 
-- pre-commit is mentioned in pygeoapi's ``requirements-dev.txt`` file, so it will be included
-  when you pip install those
-- run ``pre-commit install`` once in order to install its git commit hooks.
-- optionally, run ``pre-commit run --all-files``, which will run all pre-commit hooks for all files in the repo.
-  This also prepares the pre-commit environment.
-- from now on, whenever you do a ``git commit``, the pre-commit hooks will run and the commit
-  will only be done if all checks pass
-
-Building the documentation
---------------------------
-
-To build the documentation in pygeoapi we use `Sphinx`_. The documentation is located in the docs folder.
-
-.. note::
-   For the following instructions to work, you must be located in the root folder of pygeoapi.
-
-Install the dependencies necessary for building the documentation using the following command:
 
 .. code-block:: bash
 
-   pip3 install -r docs/requirements.txt
+   # Generate from local downloaded json schema file
+   datamodel-codegen  --input ~/Download/cql-schema.json --input-file-type jsonschema --output ./pygeoapi/models/cql_update.py --class-name CQLModel
 
-After installing the requirements, build the documentation using the ``sphinx-build`` command:
+Note that datamodel-code-generator must be explicitly installed, as it is not a pygeoapi runtime dependency
 
-.. code-block:: bash
+How to merge
+^^^^^^^^^^^^
 
-   sphinx-build -M html docs/source docs/build
-
-
-Or using the following ``make`` command:
-
-.. code-block:: bash
-
-   make -C docs html
-
-After building the documentation, the folder ``docs/build`` will contain the website generated with the documentation. 
-Add the folder to a web server or open the file ``docs/build/html/index.html`` file in a web browser to see the contents of the documentation.
-
-The documentation is hosted on `Read the Docs`_. It is automatically generated from the contents of the ``master`` branch on GitHub.
-
-The file ``.readthedocs.yaml`` contains the configuration of the Read the Docs build. Refer to the `Read the Docs configuration file`_ documentation for more information.
-
+Once the new pydantic models have been generated then the content of the Python file ``cql_update.py`` can be used to replace the old classes within the ``cql.py`` file.
+Update everything above the function ``get_next_node`` and then verify if the tests for the CQL are still passing, for example ``test_post_cql_json_between_query``
+in ``tests/test_elasticsearch__provider.py``.
 
 Working with Spatialite on OSX
 ------------------------------
@@ -147,8 +104,24 @@ Set the variable for the Spatialite library under OSX:
 
    SPATIALITE_LIBRARY_PATH=/usr/local/lib/mod_spatialite.dylib
 
-.. _`flake8`: https://flake8.pycqa.org
+
 .. _`GitHub Actions setup`: https://github.com/geopython/pygeoapi/blob/master/.github/workflows/main.yml
-.. _`Sphinx`: https://www.sphinx-doc.org
-.. _`Read the Docs`: https://docs.readthedocs.io/en/stable/index.html
-.. _`Read the Docs configuration file`: https://docs.readthedocs.io/en/stable/config-file/v2.html
+
+
+Using pre-commit
+----------------
+
+You may optionally use `pre-commit`_ in order to check for linting and other static issues
+before committing changes. Pygeoapi's repo includes a ``.pre-commit.yml``
+file, check the pre-commit docs on how to set it up - in a nutshell:
+
+- pre-commit is mentioned in pygeoapi's ``requirements-dev.txt`` file, so it will be included
+  when you pip install those
+- run ``pre-commit install`` once in order to install its git commit hooks.
+- optionally, run ``pre-commit run --all-files``, which will run all pre-commit hooks for all files in the repo.
+  This also prepares the pre-commit environment.
+- from now on, whenever you do a ``git commit``, the pre-commit hooks will run and the commit
+  will only be done if all checks pass
+
+
+.. _pre-commit:

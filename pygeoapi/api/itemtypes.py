@@ -7,8 +7,8 @@
 #          Colin Blackburn <colb@bgs.ac.uk>
 #          Ricardo Garcia Silva <ricardo.garcia.silva@geobeyond.it>
 #
-# Copyright (c) 2025 Tom Kralidis
-# Copyright (c) 2025 Francesco Bartoli
+# Copyright (c) 2024 Tom Kralidis
+# Copyright (c) 2022 Francesco Bartoli
 # Copyright (c) 2022 John A Stevenson and Colin Blackburn
 # Copyright (c) 2023 Ricardo Garcia Silva
 #
@@ -35,7 +35,7 @@
 #
 # =================================================================
 
-from collections import ChainMap
+
 from copy import deepcopy
 from datetime import datetime
 from http import HTTPStatus
@@ -44,17 +44,17 @@ from typing import Any, Tuple, Union, Optional
 import urllib.parse
 
 from pygeofilter.parsers.ecql import parse as parse_ecql_text
-from pygeofilter.parsers.cql2_json import parse as parse_cql2_json
+from pygeofilter.parsers.cql_json import parse as parse_cql_json
 from pyproj.exceptions import CRSError
 
 from pygeoapi import l10n
-from pygeoapi.api import evaluate_limit
 from pygeoapi.formatter.base import FormatterSerializationError
 from pygeoapi.linked_data import geojson2jsonld
 from pygeoapi.plugin import load_plugin, PLUGINS
 from pygeoapi.provider.base import (
     ProviderGenericError, ProviderTypeError, SchemaType)
 
+from pygeoapi.models.cql import CQLModel
 from pygeoapi.util import (CrsTransformSpec, filter_providers_by_type,
                            filter_dict_by_key_value, get_crs_from_uri,
                            get_provider_by_type, get_supported_crs_list,
@@ -80,7 +80,7 @@ DEFAULT_STORAGE_CRS = DEFAULT_CRS
 
 CONFORMANCE_CLASSES_FEATURES = [
     'http://www.opengis.net/spec/ogcapi-features-1/1.0/conf/core',
-    'http://www.opengis.net/spec/ogcapi-features-1/1.0/conf/oas30',
+    'http://www.opengis.net/spec/ogcapi-features-1/1.0/req/oas30',
     'http://www.opengis.net/spec/ogcapi-features-1/1.0/conf/html',
     'http://www.opengis.net/spec/ogcapi-features-1/1.0/conf/geojson',
     'http://www.opengis.net/spec/ogcapi-features-2/1.0/conf/crs',
@@ -88,7 +88,7 @@ CONFORMANCE_CLASSES_FEATURES = [
     'http://www.opengis.net/spec/ogcapi-features-3/1.0/conf/queryables-query-parameters',  # noqa
     'http://www.opengis.net/spec/ogcapi-features-4/1.0/conf/create-replace-delete',  # noqa
     'http://www.opengis.net/spec/ogcapi-features-5/1.0/conf/schemas',
-    'http://www.opengis.net/spec/ogcapi-features-5/1.0/conf/core-roles-features'  # noqa
+    'http://www.opengis.net/spec/ogcapi-features-5/1.0/req/core-roles-features'
 ]
 
 CONFORMANCE_CLASSES_RECORDS = [
@@ -111,7 +111,6 @@ def get_collection_queryables(api: API, request: Union[APIRequest, Any],
     :returns: tuple of headers, status code, content
     """
 
-    domains = {}
     headers = request.get_response_headers(**api.api_headers)
 
     if any([dataset is None,
@@ -122,45 +121,24 @@ def get_collection_queryables(api: API, request: Union[APIRequest, Any],
             HTTPStatus.NOT_FOUND, headers, request.format, 'NotFound', msg)
 
     LOGGER.debug('Creating collection queryables')
-
-    p = None
-    for pt in ['feature', 'coverage', 'record']:
+    try:
+        LOGGER.debug('Loading feature provider')
+        p = load_plugin('provider', get_provider_by_type(
+            api.config['resources'][dataset]['providers'], 'feature'))
+        p._load()
+    except ProviderTypeError:
         try:
-            LOGGER.debug(f'Loading {pt} provider')
+            LOGGER.debug('Loading coverage provider')
             p = load_plugin('provider', get_provider_by_type(
-                api.config['resources'][dataset]['providers'], pt))
-            break
+                api.config['resources'][dataset]['providers'], 'coverage'))  # noqa
         except ProviderTypeError:
-            LOGGER.debug(f'Providing type {pt} not found')
-
-    if p is None:
-        msg = 'queryables not available for this collection'
+            LOGGER.debug('Loading record provider')
+            p = load_plugin('provider', get_provider_by_type(
+                api.config['resources'][dataset]['providers'], 'record'))
+    except ProviderGenericError as err:
         return api.get_exception(
-
-            HTTPStatus.BAD_REQUEST, headers, request.format,
-            'NoApplicableError', msg)
-
-    LOGGER.debug('Processing profile')
-    profile = request.params.get('profile', '')
-
-    LOGGER.debug('Processing properties')
-    val = request.params.get('properties')
-    if val is not None:
-        properties = [x for x in val.split(',') if x]
-        properties_to_check = set(p.properties) | set(p.fields.keys())
-
-        if len(list(set(properties) - set(properties_to_check))) > 0:
-            msg = 'unknown properties specified'
-            return api.get_exception(
-                HTTPStatus.BAD_REQUEST, headers, request.format,
-                'InvalidParameterValue', msg)
-    else:
-        properties = []
-
-    queryables_id = f'{api.get_collections_url()}/{dataset}/queryables'
-
-    if request.params:
-        queryables_id += '?' + urllib.parse.urlencode(request.params)
+            err.http_status_code, headers, request.format,
+            err.ogc_exception_code, err.message)
 
     queryables = {
         'type': 'object',
@@ -168,26 +146,17 @@ def get_collection_queryables(api: API, request: Union[APIRequest, Any],
             api.config['resources'][dataset]['title'], request.locale),
         'properties': {},
         '$schema': 'http://json-schema.org/draft/2019-09/schema',
-        '$id': queryables_id
+        '$id': f'{api.get_collections_url()}/{dataset}/queryables'
     }
 
     if p.fields:
         queryables['properties']['geometry'] = {
-            'format': 'geometry-any',
+            '$ref': 'https://geojson.org/schema/Geometry.json',
             'x-ogc-role': 'primary-geometry'
         }
 
-    if profile == 'actual-domain':
-        try:
-            domains, _ = p.get_domains(properties)
-        except NotImplementedError:
-            LOGGER.debug('Domains are not suported by this provider')
-            domains = {}
-
     for k, v in p.fields.items():
         show_field = False
-        if properties and k not in properties:
-            continue
         if p.properties:
             if k in p.properties:
                 show_field = True
@@ -199,8 +168,6 @@ def get_collection_queryables(api: API, request: Union[APIRequest, Any],
                 'title': k,
                 'type': v['type']
             }
-            if v['type'] == 'float':
-                queryables['properties'][k]['type'] = 'number'
             if v.get('format') is not None:
                 queryables['properties'][k]['format'] = v['format']
             if 'values' in v:
@@ -210,19 +177,14 @@ def get_collection_queryables(api: API, request: Union[APIRequest, Any],
                 queryables['properties'][k]['x-ogc-role'] = 'id'
             if k == p.time_field:
                 queryables['properties'][k]['x-ogc-role'] = 'primary-instant'  # noqa
-            if domains.get(k):
-                queryables['properties'][k]['enum'] = domains[k]
 
     if request.format == F_HTML:  # render
-        tpl_config = api.get_dataset_templates(dataset)
-
         queryables['title'] = l10n.translate(
             api.config['resources'][dataset]['title'], request.locale)
 
         queryables['collections_path'] = api.get_collections_url()
-        queryables['dataset_path'] = f'{api.get_collections_url()}/{dataset}'
 
-        content = render_j2_template(api.tpl_config, tpl_config,
+        content = render_j2_template(api.tpl_config,
                                      'collections/queryables.html',
                                      queryables, request.locale)
 
@@ -277,29 +239,33 @@ def get_collection_items(
             return api.get_exception(
                 HTTPStatus.BAD_REQUEST, headers, request.format,
                 'InvalidParameterValue', msg)
+    except TypeError as err:
+        LOGGER.warning(err)
+        offset = 0
     except ValueError:
         msg = 'offset value should be an integer'
         return api.get_exception(
             HTTPStatus.BAD_REQUEST, headers, request.format,
             'InvalidParameterValue', msg)
-    except TypeError as err:
-        LOGGER.warning(err)
-        offset = 0
 
     LOGGER.debug('Processing limit parameter')
-    if api.config['server'].get('limit') is not None:
-        msg = ('server.limit is no longer supported! '
-               'Please use limits at the server or collection '
-               'level (RFC5)')
-        LOGGER.warning(msg)
     try:
-        limit = evaluate_limit(request.params.get('limit'),
-                               api.config['server'].get('limits', {}),
-                               collections[dataset].get('limits', {}))
-    except ValueError as err:
+        limit = int(request.params.get('limit'))
+        # TODO: We should do more validation, against the min and max
+        #       allowed by the server configuration
+        if limit <= 0:
+            msg = 'limit value should be strictly positive'
+            return api.get_exception(
+                HTTPStatus.BAD_REQUEST, headers, request.format,
+                'InvalidParameterValue', msg)
+    except TypeError as err:
+        LOGGER.warning(err)
+        limit = int(api.config['server']['limit'])
+    except ValueError:
+        msg = 'limit value should be an integer'
         return api.get_exception(
             HTTPStatus.BAD_REQUEST, headers, request.format,
-            'InvalidParameterValue', str(err))
+            'InvalidParameterValue', msg)
 
     resulttype = request.params.get('resulttype') or 'results'
 
@@ -339,7 +305,18 @@ def get_collection_items(
         provider_type = 'feature'
         provider_def = get_provider_by_type(
             collections[dataset]['providers'], provider_type)
+
+        # clear data if no URL params
+        load_data = False
+        for item in request.params:
+            if item.lower() == 'speckleurl' and len(request.params[item])>40 and ('speckleurl=' + request.params[item]) in provider_def['data'].lower():
+                load_data = True
+                break
+        if load_data is False:
+            provider_def['data'] = ""
+        
         p = load_plugin('provider', provider_def)
+
     except ProviderTypeError:
         try:
             provider_type = 'record'
@@ -389,7 +366,7 @@ def get_collection_items(
                 HTTPStatus.BAD_REQUEST, headers, request.format,
                 'NoApplicableCode', msg)
 
-        supported_crs_list = get_supported_crs_list(provider_def, DEFAULT_CRS_LIST)  # noqa
+        supported_crs_list = get_supported_crs_list(provider_def, DEFAULT_CRS_LIST) # noqa
         if bbox_crs not in supported_crs_list:
             msg = f'bbox-crs {bbox_crs} not supported for this collection'
             return api.get_exception(
@@ -399,12 +376,12 @@ def get_collection_items(
         # bbox but no bbox-crs param: assume bbox is in default CRS
         bbox_crs = DEFAULT_CRS
 
-    # Transform bbox to storageCrs
-    # when bbox-crs different from storageCrs.
+    # Transform bbox to storageCRS
+    # when bbox-crs different from storageCRS.
     if len(bbox) > 0:
         try:
             # Get a pyproj CRS instance for the Collection's Storage CRS
-            storage_crs = provider_def.get('storage_crs', DEFAULT_STORAGE_CRS)  # noqa
+            storage_crs = provider_def.get('storage_crs', DEFAULT_STORAGE_CRS) # noqa
 
             # Do the (optional) Transform to the Storage CRS
             bbox = transform_bbox(bbox, bbox_crs, storage_crs)
@@ -415,16 +392,9 @@ def get_collection_items(
 
     LOGGER.debug('processing property parameters')
     for k, v in request.params.items():
-        include_query_param = False
-        if k not in reserved_fieldnames:
-            if k in list(p.fields.keys()) or p.include_extra_query_parameters:
-                include_query_param = True
-
-        if include_query_param:
-            LOGGER.debug(f'Including query parameter {k}={v}')
+        if k not in reserved_fieldnames and k in list(p.fields.keys()):
+            LOGGER.debug(f'Adding property filter {k}={v}')
             properties.append((k, v))
-        else:
-            LOGGER.debug(f'Discarding query parameter {k}={v}')
 
     LOGGER.debug('processing sort parameter')
     val = request.params.get('sortby')
@@ -474,10 +444,8 @@ def get_collection_items(
 
     LOGGER.debug('Processing filter-crs parameter')
     filter_crs_uri = request.params.get('filter-crs', DEFAULT_CRS)
-
     LOGGER.debug('processing filter parameter')
     cql_text = request.params.get('filter')
-
     if cql_text is not None:
         try:
             filter_ = parse_ecql_text(cql_text)
@@ -488,24 +456,7 @@ def get_collection_items(
                 geometry_column_name=provider_def.get('geom_field'),
             )
         except Exception:
-            msg = 'Bad CQL text'
-            LOGGER.error(f'{msg}: {cql_text}')
-            return api.get_exception(
-                HTTPStatus.BAD_REQUEST, headers, request.format,
-                'InvalidParameterValue', msg)
-    elif request.data:
-        try:
-            request_data = request.data.decode()
-            filter_ = parse_cql2_json(request_data)
-            filter_ = modify_pygeofilter(
-                filter_,
-                filter_crs_uri=filter_crs_uri,
-                storage_crs_uri=provider_def.get('storage_crs'),
-                geometry_column_name=provider_def.get('geom_field'),
-            )
-        except Exception:
-            msg = 'Bad CQL JSON'
-            LOGGER.error(f'{msg}: {request_data}')
+            msg = f'Bad CQL string : {cql_text}'
             return api.get_exception(
                 HTTPStatus.BAD_REQUEST, headers, request.format,
                 'InvalidParameterValue', msg)
@@ -515,7 +466,7 @@ def get_collection_items(
     LOGGER.debug('Processing filter-lang parameter')
     filter_lang = request.params.get('filter-lang')
     # Currently only cql-text is handled, but it is optional
-    if filter_lang not in [None, 'cql-json', 'cql-text']:
+    if filter_lang not in [None, 'cql-text']:
         msg = 'Invalid filter language'
         return api.get_exception(
             HTTPStatus.BAD_REQUEST, headers, request.format,
@@ -563,12 +514,9 @@ def get_collection_items(
             serialized_query_params += '='
             serialized_query_params += urllib.parse.quote(str(v), safe=',')
 
-    if 'links' not in content:
-        content['links'] = []
-
     # TODO: translate titles
     uri = f'{api.get_collections_url()}/{dataset}/items'
-    content['links'].extend([{
+    content['links'] = [{
         'type': 'application/geo+json',
         'rel': request.get_linkrel(F_JSON),
         'title': l10n.translate('This document as GeoJSON', request.locale),
@@ -583,23 +531,9 @@ def get_collection_items(
         'rel': request.get_linkrel(F_HTML),
         'title': l10n.translate('This document as HTML', request.locale),
         'href': f'{uri}?f={F_HTML}{serialized_query_params}'
-    }])
+    }]
 
-    next_link = False
-    prev_link = False
-
-    if 'next' in [link['rel'] for link in content['links']]:
-        LOGGER.debug('Using next link from provider')
-    else:
-        if content.get('numberMatched', -1) > (limit + offset):
-            next_link = True
-        elif len(content['features']) == limit:
-            next_link = True
-
-        if offset > 0:
-            prev_link = True
-
-    if prev_link:
+    if offset > 0:
         prev = max(0, offset - limit)
         content['links'].append(
             {
@@ -609,16 +543,17 @@ def get_collection_items(
                 'href': f'{uri}?offset={prev}{serialized_query_params}'
             })
 
-    if next_link:
-        next_ = offset + limit
-        next_href = f'{uri}?offset={next_}{serialized_query_params}'
-        content['links'].append(
-            {
-                'type': 'application/geo+json',
-                'rel': 'next',
-                'title': l10n.translate('Items (next)', request.locale),
-                'href': next_href
-            })
+    if 'numberMatched' in content:
+        if content['numberMatched'] > (limit + offset):
+            next_ = offset + limit
+            next_href = f'{uri}?offset={next_}{serialized_query_params}'
+            content['links'].append(
+                {
+                    'type': 'application/geo+json',
+                    'rel': 'next',
+                    'title': l10n.translate('Items (next)', request.locale),
+                    'href': next_href
+                })
 
     content['links'].append(
         {
@@ -631,14 +566,20 @@ def get_collection_items(
 
     content['timeStamp'] = datetime.utcnow().strftime(
         '%Y-%m-%dT%H:%M:%S.%fZ')
+    
+    # Save passed parameters
+    url_saved_as_data = collections[dataset]['providers'][0]['data']
+    url_props = []
 
+    if isinstance(url_saved_as_data, str):
+        url_props = url_saved_as_data.lower().split("&")
+    
     # Set response language to requested provider locale
     # (if it supports language) and/or otherwise the requested pygeoapi
     # locale (or fallback default locale)
     l10n.set_response_language(headers, prv_locale, request.locale)
 
     if request.format == F_HTML:  # render
-        tpl_config = api.get_dataset_templates(dataset)
         # For constructing proper URIs to items
 
         content['items_path'] = uri
@@ -655,7 +596,7 @@ def get_collection_items(
                                                     request.locale)
             # If title exists, use it as id in html templates
             content['id_field'] = content['title_field']
-        content = render_j2_template(api.tpl_config, tpl_config,
+        content = render_j2_template(api.tpl_config,
                                      'collections/items/index.html',
                                      content, request.locale)
         return headers, HTTPStatus.OK, content
@@ -668,8 +609,8 @@ def get_collection_items(
                 data=content,
                 options={
                     'provider_def': get_provider_by_type(
-                        collections[dataset]['providers'],
-                        'feature')
+                                        collections[dataset]['providers'],
+                                        'feature')
                 }
             )
         except FormatterSerializationError:
@@ -695,7 +636,288 @@ def get_collection_items(
             api, content, dataset, id_field=(p.uri_field or 'id')
         )
 
-        return headers, HTTPStatus.OK, content
+    return headers, HTTPStatus.OK, to_json(content, api.pretty_print)
+
+
+def post_collection_items(
+        api: API, request: APIRequest, dataset) -> Tuple[dict, int, str]:
+    """
+    Queries collection or filter an item
+
+    :param request: A request object
+    :param dataset: dataset name
+
+    :returns: tuple of headers, status code, content
+    """
+
+    request_headers = request.headers
+
+    if not request.is_valid(PLUGINS['formatter'].keys()):
+        return api.get_format_exception(request)
+
+    # Set Content-Language to system locale until provider locale
+    # has been determined
+    headers = request.get_response_headers(SYSTEM_LOCALE, **api.api_headers)
+
+    properties = []
+    reserved_fieldnames = ['bbox', 'f', 'limit', 'offset',
+                           'resulttype', 'datetime', 'sortby',
+                           'properties', 'skipGeometry', 'q',
+                           'filter-lang', 'filter-crs']
+
+    collections = filter_dict_by_key_value(api.config['resources'],
+                                           'type', 'collection')
+
+    if dataset not in collections.keys():
+        msg = 'Invalid collection'
+        return api.get_exception(
+            HTTPStatus.BAD_REQUEST, headers, request.format,
+            'InvalidParameterValue', msg)
+
+    LOGGER.debug('Processing query parameters')
+
+    LOGGER.debug('Processing offset parameter')
+    try:
+        offset = int(request.params.get('offset'))
+        if offset < 0:
+            msg = 'offset value should be positive or zero'
+            return api.get_exception(
+                HTTPStatus.BAD_REQUEST, headers, request.format,
+                'InvalidParameterValue', msg)
+    except TypeError as err:
+        LOGGER.warning(err)
+        offset = 0
+    except ValueError:
+        msg = 'offset value should be an integer'
+        return api.get_exception(
+            HTTPStatus.BAD_REQUEST, headers, request.format,
+            'InvalidParameterValue', msg)
+
+    LOGGER.debug('Processing limit parameter')
+    try:
+        limit = int(request.params.get('limit'))
+        # TODO: We should do more validation, against the min and max
+        # allowed by the server configuration
+        if limit <= 0:
+            msg = 'limit value should be strictly positive'
+            return api.get_exception(
+                HTTPStatus.BAD_REQUEST, headers, request.format,
+                'InvalidParameterValue', msg)
+    except TypeError as err:
+        LOGGER.warning(err)
+        limit = int(api.config['server']['limit'])
+    except ValueError:
+        msg = 'limit value should be an integer'
+        return api.get_exception(
+            HTTPStatus.BAD_REQUEST, headers, request.format,
+            'InvalidParameterValue', msg)
+
+    resulttype = request.params.get('resulttype') or 'results'
+
+    LOGGER.debug('Processing bbox parameter')
+
+    bbox = request.params.get('bbox')
+
+    if bbox is None:
+        bbox = []
+    else:
+        try:
+            bbox = validate_bbox(bbox)
+        except ValueError as err:
+            msg = str(err)
+            return api.get_exception(
+                HTTPStatus.BAD_REQUEST, headers, request.format,
+                'InvalidParameterValue', msg)
+
+    LOGGER.debug('Processing datetime parameter')
+    datetime_ = request.params.get('datetime')
+    try:
+        datetime_ = validate_datetime(collections[dataset]['extents'],
+                                      datetime_)
+    except ValueError as err:
+        msg = str(err)
+        return api.get_exception(
+            HTTPStatus.BAD_REQUEST, headers, request.format,
+            'InvalidParameterValue', msg)
+
+    LOGGER.debug('processing q parameter')
+    val = request.params.get('q')
+
+    q = None
+    if val is not None:
+        q = val
+
+    LOGGER.debug('Loading provider')
+
+    try:
+        provider_def = get_provider_by_type(
+            collections[dataset]['providers'], 'feature')
+    except ProviderTypeError:
+        try:
+            provider_def = get_provider_by_type(
+                collections[dataset]['providers'], 'record')
+        except ProviderTypeError:
+            msg = 'Invalid provider type'
+            return api.get_exception(
+                HTTPStatus.BAD_REQUEST, headers, request.format,
+                'NoApplicableCode', msg)
+
+    try:
+        p = load_plugin('provider', provider_def)
+    except ProviderGenericError as err:
+        return api.get_exception(
+            err.http_status_code, headers, request.format,
+            err.ogc_exception_code, err.message)
+
+    LOGGER.debug('processing property parameters')
+    for k, v in request.params.items():
+        if k not in reserved_fieldnames and k not in p.fields.keys():
+            msg = f'unknown query parameter: {k}'
+            return api.get_exception(
+                HTTPStatus.BAD_REQUEST, headers, request.format,
+                'InvalidParameterValue', msg)
+        elif k not in reserved_fieldnames and k in p.fields.keys():
+            LOGGER.debug(f'Add property filter {k}={v}')
+            properties.append((k, v))
+
+    LOGGER.debug('processing sort parameter')
+    val = request.params.get('sortby')
+
+    if val is not None:
+        sortby = []
+        sorts = val.split(',')
+        for s in sorts:
+            prop = s
+            order = '+'
+            if s[0] in ['+', '-']:
+                order = s[0]
+                prop = s[1:]
+
+            if prop not in p.fields.keys():
+                msg = 'bad sort property'
+                return api.get_exception(
+                    HTTPStatus.BAD_REQUEST, headers, request.format,
+                    'InvalidParameterValue', msg)
+
+            sortby.append({'property': prop, 'order': order})
+    else:
+        sortby = []
+
+    LOGGER.debug('processing properties parameter')
+    val = request.params.get('properties')
+
+    if val is not None:
+        select_properties = val.split(',')
+        properties_to_check = set(p.properties) | set(p.fields.keys())
+
+        if (len(list(set(select_properties) -
+                     set(properties_to_check))) > 0):
+            msg = 'unknown properties specified'
+            return api.get_exception(
+                HTTPStatus.BAD_REQUEST, headers, request.format,
+                'InvalidParameterValue', msg)
+    else:
+        select_properties = []
+
+    LOGGER.debug('processing skipGeometry parameter')
+    val = request.params.get('skipGeometry')
+    if val is not None:
+        skip_geometry = str2bool(val)
+    else:
+        skip_geometry = False
+
+    LOGGER.debug('Processing filter-crs parameter')
+    filter_crs = request.params.get('filter-crs', DEFAULT_CRS)
+    LOGGER.debug('Processing filter-lang parameter')
+    filter_lang = request.params.get('filter-lang')
+    if filter_lang != 'cql-json':  # @TODO add check from the configuration
+        msg = 'Invalid filter language'
+        return api.get_exception(
+            HTTPStatus.BAD_REQUEST, headers, request.format,
+            'InvalidParameterValue', msg)
+
+    LOGGER.debug('Querying provider')
+    LOGGER.debug(f'offset: {offset}')
+    LOGGER.debug(f'limit: {limit}')
+    LOGGER.debug(f'resulttype: {resulttype}')
+    LOGGER.debug(f'sortby: {sortby}')
+    LOGGER.debug(f'bbox: {bbox}')
+    LOGGER.debug(f'datetime: {datetime_}')
+    LOGGER.debug(f'properties: {select_properties}')
+    LOGGER.debug(f'skipGeometry: {skip_geometry}')
+    LOGGER.debug(f'q: {q}')
+    LOGGER.debug(f'filter-lang: {filter_lang}')
+    LOGGER.debug(f'filter-crs: {filter_crs}')
+
+    LOGGER.debug('Processing headers')
+
+    LOGGER.debug('Processing request content-type header')
+    if (request_headers.get(
+        'Content-Type') or request_headers.get(
+            'content-type')) != 'application/query-cql-json':
+        msg = ('Invalid body content-type')
+        return api.get_exception(
+            HTTPStatus.BAD_REQUEST, headers, request.format,
+            'InvalidHeaderValue', msg)
+
+    LOGGER.debug('Processing body')
+
+    if not request.data:
+        msg = 'missing request data'
+        return api.get_exception(
+            HTTPStatus.BAD_REQUEST, headers, request.format,
+            'MissingParameterValue', msg)
+
+    filter_ = None
+    try:
+        # Parse bytes data, if applicable
+        data = request.data.decode()
+        LOGGER.debug(data)
+    except UnicodeDecodeError:
+        msg = 'Unicode error in data'
+        return api.get_exception(
+            HTTPStatus.BAD_REQUEST, headers, request.format,
+            'InvalidParameterValue', msg)
+
+    # FIXME: remove testing backend in use once CQL support is normalized
+    if p.name == 'PostgreSQL':
+        LOGGER.debug('processing PostgreSQL CQL_JSON data')
+        try:
+            filter_ = parse_cql_json(data)
+            filter_ = modify_pygeofilter(
+                filter_,
+                filter_crs_uri=filter_crs,
+                storage_crs_uri=provider_def.get('storage_crs'),
+                geometry_column_name=provider_def.get('geom_field')
+            )
+        except Exception:
+            msg = f'Bad CQL string : {data}'
+            return api.get_exception(
+                HTTPStatus.BAD_REQUEST, headers, request.format,
+                'InvalidParameterValue', msg)
+    else:
+        LOGGER.debug('processing Elasticsearch CQL_JSON data')
+        try:
+            filter_ = CQLModel.parse_raw(data)
+        except Exception:
+            msg = f'Bad CQL string : {data}'
+            return api.get_exception(
+                HTTPStatus.BAD_REQUEST, headers, request.format,
+                'InvalidParameterValue', msg)
+
+    try:
+        content = p.query(offset=offset, limit=limit,
+                          resulttype=resulttype, bbox=bbox,
+                          datetime_=datetime_, properties=properties,
+                          sortby=sortby,
+                          select_properties=select_properties,
+                          skip_geometry=skip_geometry,
+                          q=q,
+                          filterq=filter_)
+    except ProviderGenericError as err:
+        return api.get_exception(
+            err.http_status_code, headers, request.format,
+            err.ogc_exception_code, err.message)
 
     return headers, HTTPStatus.OK, to_json(content, api.pretty_print)
 
@@ -958,7 +1180,6 @@ def get_collection_item(api: API, request: APIRequest,
     l10n.set_response_language(headers, prv_locale, request.locale)
 
     if request.format == F_HTML:  # render
-        tpl_config = api.get_dataset_templates(dataset)
         content['title'] = l10n.translate(collections[dataset]['title'],
                                           request.locale)
         content['id_field'] = p.id_field
@@ -969,7 +1190,7 @@ def get_collection_item(api: API, request: APIRequest,
                                                     request.locale)
         content['collections_path'] = api.get_collections_url()
 
-        content = render_j2_template(api.tpl_config, tpl_config,
+        content = render_j2_template(api.tpl_config,
                                      'collections/items/item.html',
                                      content, request.locale)
         return headers, HTTPStatus.OK, content
@@ -978,8 +1199,6 @@ def get_collection_item(api: API, request: APIRequest,
         content = geojson2jsonld(
             api, content, dataset, uri, (p.uri_field or 'id')
         )
-
-        return headers, HTTPStatus.OK, content
 
     return headers, HTTPStatus.OK, to_json(content, api.pretty_print)
 
@@ -1011,7 +1230,7 @@ def create_crs_transform_spec(
 
     if not query_crs_uri:
         if storage_crs_uri in DEFAULT_CRS_LIST:
-            # Could be that storageCrs is
+            # Could be that storageCRS is
             # http://www.opengis.net/def/crs/OGC/1.3/CRS84h
             query_crs_uri = storage_crs_uri
         else:
@@ -1068,7 +1287,7 @@ def set_content_crs_header(
         # If empty use default CRS
         storage_crs_uri = config.get('storage_crs', DEFAULT_STORAGE_CRS)
         if storage_crs_uri in DEFAULT_CRS_LIST:
-            # Could be that storageCrs is one of the defaults like
+            # Could be that storageCRS is one of the defaults like
             # http://www.opengis.net/def/crs/OGC/1.3/CRS84h
             content_crs_uri = storage_crs_uri
         else:
@@ -1104,34 +1323,6 @@ def get_oas_30(cfg: dict, locale: str) -> tuple[list[dict[str, str]], dict[str, 
         }
     }
 
-    limit = {
-        'name': 'limit',
-        'in': 'query',
-        'description': 'The optional limit parameter limits the number of items that are presented in the response document',  # noqa
-        'required': False,
-        'schema': {
-            'type': 'integer',
-            'minimum': 1,
-            'maximum': 10000,
-            'default': 100
-        },
-        'style': 'form',
-        'explode': False
-    }
-
-    profile = {
-        'name': 'profile',
-        'in': 'query',
-        'description': 'The profile to be applied to a given request',
-        'required': False,
-        'style': 'form',
-        'explode': False,
-        'schema': {
-            'type': 'string',
-            'enum': ['actual-domain', 'valid-domain']
-        }
-    }
-
     LOGGER.debug('setting up collection endpoints')
     paths = {}
 
@@ -1162,11 +1353,6 @@ def get_oas_30(cfg: dict, locale: str) -> tuple[list[dict[str, str]], dict[str, 
 
             coll_properties['schema']['items']['enum'] = list(p.fields.keys())
 
-            coll_limit = _derive_limit(
-                deepcopy(limit), cfg['server'].get('limits', {}),
-                v.get('limits', {})
-            )
-
             paths[items_path] = {
                 'get': {
                     'summary': f'Get {title} items',
@@ -1177,7 +1363,7 @@ def get_oas_30(cfg: dict, locale: str) -> tuple[list[dict[str, str]], dict[str, 
                         {'$ref': '#/components/parameters/f'},
                         {'$ref': '#/components/parameters/lang'},
                         {'$ref': '#/components/parameters/bbox'},
-                        coll_limit,
+                        {'$ref': f"{OPENAPI_YAML['oapif-1']}#/components/parameters/limit"},  # noqa
                         {'$ref': '#/components/parameters/crs'},  # noqa
                         {'$ref': '#/components/parameters/bbox-crs'},
                         coll_properties,
@@ -1270,9 +1456,7 @@ def get_oas_30(cfg: dict, locale: str) -> tuple[list[dict[str, str]], dict[str, 
                         'tags': [k],
                         'operationId': f'get{k.capitalize()}Queryables',
                         'parameters': [
-                            coll_properties,
                             {'$ref': '#/components/parameters/f'},
-                            profile,
                             {'$ref': '#/components/parameters/lang'}
                         ],
                         'responses': {
@@ -1428,28 +1612,3 @@ def get_oas_30(cfg: dict, locale: str) -> tuple[list[dict[str, str]], dict[str, 
             LOGGER.debug('collection is not feature/item based')
 
     return [{'name': 'records'}, {'name': 'features'}], {'paths': paths}
-
-
-def _derive_limit(limit_object, server_limits, collection_limits) -> dict:
-    """
-    Helper function to derive a limit object for a given collection
-
-    :param limit_object: OpenAPI limit parameter
-    :param server_limits: server level limits configuration
-    :param collection_limits: collection level limits configuration
-
-    :returns: updated limit object
-    """
-
-    effective_limits = ChainMap(collection_limits, server_limits)
-
-    default_limit = effective_limits.get('default_items', 10)
-    max_limit = effective_limits.get('max_items', 10)
-
-    limit_object['schema']['default'] = default_limit
-    limit_object['schema']['maximum'] = max_limit
-
-    text = f' (maximum={max_limit}, default={default_limit}).'
-    limit_object['description'] += text
-
-    return limit_object

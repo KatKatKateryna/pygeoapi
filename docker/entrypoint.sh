@@ -2,10 +2,8 @@
 # =================================================================
 #
 # Authors: Just van den Broecke <justb4@gmail.com>
-#          Benjamin Webb <benjamin.miller.webb@gmail.com>
 #
 # Copyright (c) 2019 Just van den Broecke
-# Copyright (c) 2024 Benjamin Webb
 #
 # Permission is hereby granted, free of charge, to any person
 # obtaining a copy of this software and associated documentation
@@ -45,7 +43,6 @@ SCRIPT_NAME=${SCRIPT_NAME:=/}
 CONTAINER_NAME=${CONTAINER_NAME:=pygeoapi}
 CONTAINER_HOST=${CONTAINER_HOST:=0.0.0.0}
 CONTAINER_PORT=${CONTAINER_PORT:=80}
-WSGI_APP=${WSGI_APP:=pygeoapi.flask_app:APP}
 WSGI_WORKERS=${WSGI_WORKERS:=4}
 WSGI_WORKER_TIMEOUT=${WSGI_WORKER_TIMEOUT:=6000}
 WSGI_WORKER_CLASS=${WSGI_WORKER_CLASS:=gevent}
@@ -68,20 +65,6 @@ pygeoapi openapi generate ${PYGEOAPI_CONFIG} --output-file ${PYGEOAPI_OPENAPI}
 [[ $? -ne 0 ]] && error "openapi.yml could not be generated ERROR"
 
 echo "openapi.yml generated continue to pygeoapi"
-
-start_gunicorn() {
-	# SCRIPT_NAME should not have value '/'
-	[[ "${SCRIPT_NAME}" = '/' ]] && export SCRIPT_NAME="" && echo "make SCRIPT_NAME empty from /"
-
-	echo "Starting gunicorn name=${CONTAINER_NAME} on ${CONTAINER_HOST}:${CONTAINER_PORT} with ${WSGI_WORKERS} workers and SCRIPT_NAME=${SCRIPT_NAME}"
-	exec gunicorn --workers ${WSGI_WORKERS} \
-		--worker-class=${WSGI_WORKER_CLASS} \
-		--timeout ${WSGI_WORKER_TIMEOUT} \
-		--name=${CONTAINER_NAME} \
-		--bind ${CONTAINER_HOST}:${CONTAINER_PORT} \
-		${@} \
-		${WSGI_APP}
-}
 
 case ${entry_cmd} in
 	# Run Unit tests
@@ -108,21 +91,19 @@ case ${entry_cmd} in
 
 	# Run pygeoapi server
 	run)
-		# Start
-		start_gunicorn
-		;;
+		# SCRIPT_NAME should not have value '/'
+		[[ "${SCRIPT_NAME}" = '/' ]] && export SCRIPT_NAME="" && echo "make SCRIPT_NAME empty from /"
 
-	# Run pygeoapi server with hot reload
-	run-with-hot-reload)
-		# Lock all Python files (for gunicorn hot reload)
-		find . -type f -name "*.py" | xargs chmod 0444
-
-		# Start with hot reload options
-		start_gunicorn --reload --reload-extra-file ${PYGEOAPI_CONFIG}
-		;;
-
+		echo "Start gunicorn name=${CONTAINER_NAME} on ${CONTAINER_HOST}:${CONTAINER_PORT} with ${WSGI_WORKERS} workers and SCRIPT_NAME=${SCRIPT_NAME}"
+		exec gunicorn --workers ${WSGI_WORKERS} \
+				--worker-class=${WSGI_WORKER_CLASS} \
+				--timeout ${WSGI_WORKER_TIMEOUT} \
+				--name=${CONTAINER_NAME} \
+				--bind ${CONTAINER_HOST}:${CONTAINER_PORT} \
+				pygeoapi.flask_app:APP
+	  ;;
 	*)
-	  error "unknown command arg: must be run (default), run-with-hot-reload, or test"
+	  error "unknown command arg: must be run (default) or test"
 	  ;;
 esac
 

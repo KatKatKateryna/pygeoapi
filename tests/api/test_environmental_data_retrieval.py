@@ -5,7 +5,7 @@
 #          Colin Blackburn <colb@bgs.ac.uk>
 #          Bernhard Mallinger <bernhard.mallinger@eox.at>
 #
-# Copyright (c) 2025 Tom Kralidis
+# Copyright (c) 2024 Tom Kralidis
 # Copyright (c) 2022 John A Stevenson and Colin Blackburn
 #
 # Permission is hereby granted, free of charge, to any person
@@ -35,7 +35,6 @@
 import json
 from http import HTTPStatus
 
-from pygeoapi.api import describe_collections
 from pygeoapi.api.environmental_data_retrieval import get_collection_edr_query
 
 from tests.util import mock_api_request
@@ -44,7 +43,7 @@ from tests.util import mock_api_request
 def test_get_collection_edr_query(config, api_):
     # edr resource
     req = mock_api_request()
-    rsp_headers, code, response = describe_collections(api_, req, 'icoads-sst')
+    rsp_headers, code, response = api_.describe_collections(req, 'icoads-sst')
     collection = json.loads(response)
     parameter_names = list(collection['parameter_names'].keys())
     parameter_names.sort()
@@ -87,12 +86,12 @@ def test_get_collection_edr_query(config, api_):
     axes = list(data['domain']['axes'].keys())
     axes.sort()
     assert len(axes) == 3
-    assert axes == ['t', 'x', 'y']
+    assert axes == ['TIME', 'x', 'y']
 
-    assert isinstance(data['domain']['axes']['x'], dict)
-    assert isinstance(data['domain']['axes']['x']['values'], list)
-    assert data['domain']['axes']['x']['values'][0] == 11.0
-    assert data['domain']['axes']['y']['values'][0] == 11.0
+    assert data['domain']['axes']['x']['start'] == 11.0
+    assert data['domain']['axes']['x']['stop'] == 11.0
+    assert data['domain']['axes']['y']['start'] == 11.0
+    assert data['domain']['axes']['y']['stop'] == 11.0
 
     parameters = list(data['parameters'].keys())
     parameters.sort()
@@ -131,19 +130,11 @@ def test_get_collection_edr_query(config, api_):
     assert code == HTTPStatus.OK
 
     data = json.loads(response)
-    time_dict = data['domain']['axes']['t']
-    assert isinstance(time_dict, dict)
-    assert isinstance(time_dict['values'], list)
+    time_dict = data['domain']['axes']['TIME']
 
-    t_values = [
-        '2000-02-15T16:29:05.999999999',
-        '2000-03-17T02:58:12.000000000',
-        '2000-04-16T13:27:18.000000000',
-        '2000-05-16T23:56:24.000000000',
-        '2000-06-16T10:25:30.000000000'
-    ]
-
-    assert sorted(time_dict['values']) == t_values
+    assert time_dict['start'] == '2000-02-15T16:29:05.999999999'
+    assert time_dict['stop'] == '2000-06-16T10:25:30.000000000'
+    assert time_dict['num'] == 5
 
     # unbounded date range - start
     req = mock_api_request({
@@ -155,20 +146,11 @@ def test_get_collection_edr_query(config, api_):
     assert code == HTTPStatus.OK
 
     data = json.loads(response)
-    time_dict = data['domain']['axes']['t']
-    assert isinstance(time_dict, dict)
-    assert isinstance(time_dict['values'], list)
+    time_dict = data['domain']['axes']['TIME']
 
-    t_values = [
-        '2000-01-16T06:00:00.000000000',
-        '2000-02-15T16:29:05.999999999',
-        '2000-03-17T02:58:12.000000000',
-        '2000-04-16T13:27:18.000000000',
-        '2000-05-16T23:56:24.000000000',
-        '2000-06-16T10:25:30.000000000'
-    ]
-
-    assert sorted(time_dict['values']) == t_values
+    assert time_dict['start'] == '2000-01-16T06:00:00.000000000'
+    assert time_dict['stop'] == '2000-06-16T10:25:30.000000000'
+    assert time_dict['num'] == 6
 
     # unbounded date range - end
     req = mock_api_request({
@@ -180,21 +162,11 @@ def test_get_collection_edr_query(config, api_):
     assert code == HTTPStatus.OK
 
     data = json.loads(response)
-    time_dict = data['domain']['axes']['t']
-    assert isinstance(time_dict, dict)
-    assert isinstance(time_dict['values'], list)
+    time_dict = data['domain']['axes']['TIME']
 
-    t_values = [
-        '2000-06-16T10:25:30.000000000',
-        '2000-07-16T20:54:36.000000000',
-        '2000-08-16T07:23:42.000000000',
-        '2000-09-15T17:52:48.000000000',
-        '2000-10-16T04:21:54.000000000',
-        '2000-11-15T14:51:00.000000000',
-        '2000-12-16T01:20:05.999999996'
-    ]
-
-    assert sorted(time_dict['values']) == t_values
+    assert time_dict['start'] == '2000-06-16T10:25:30.000000000'
+    assert time_dict['stop'] == '2000-12-16T01:20:05.999999996'
+    assert time_dict['num'] == 7
 
     # some data
     req = mock_api_request({

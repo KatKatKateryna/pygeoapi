@@ -46,17 +46,15 @@ from pathlib import Path
 from typing import Any, Tuple
 
 from sqlalchemy import insert, update, delete
-from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session
 
-from pygeoapi.api import FORMAT_TYPES, F_JSON, F_JSONLD
 from pygeoapi.process.base import (
     JobNotFoundError,
     JobResultNotFoundError,
     ProcessorGenericError
 )
 from pygeoapi.process.manager.base import BaseManager
-from pygeoapi.provider.sql import get_engine, get_table_model
+from pygeoapi.provider.postgresql import get_engine, get_table_model
 from pygeoapi.util import JobStatus
 
 
@@ -85,22 +83,14 @@ class PostgreSQLManager(BaseManager):
             self.db_search_path = tuple(self.connection.get('search_path',
                                         ['public']))
         except Exception:
-            self.db_search_path = ('public',)
+            self.db_search_path = 'public'
 
         try:
             LOGGER.debug('Connecting to database')
             if isinstance(self.connection, str):
-                _url = make_url(self.connection)
-                self._engine = get_engine(
-                    'postgresql+psycopg2',
-                    _url.host,
-                    _url.port,
-                    _url.database,
-                    _url.username,
-                    _url.password)
+                self._engine = get_engine(self.connection)
             else:
-                self._engine = get_engine('postgresql+psycopg2',
-                                          **self.connection)
+                self._engine = get_engine(**self.connection)
         except Exception as err:
             msg = 'Test connecting to DB failed'
             LOGGER.error(f'{msg}: {err}')
@@ -119,18 +109,16 @@ class PostgreSQLManager(BaseManager):
             LOGGER.error(f'{msg}: {err}')
             raise ProcessorGenericError(msg)
 
-    def get_jobs(self, status: JobStatus = None, limit=None, offset=None
-                 ) -> dict:
+    def get_jobs(self, status: JobStatus = None) -> list:
         """
         Get jobs
 
         :param status: job status (accepted, running, successful,
                         failed, results) (default is all)
-        :param limit: number of jobs to return
-        :param offset: pagination offset
 
-        :returns: dict of list of jobs (identifier, status, process identifier)
-                  and numberMatched
+        :returns: 'list` of jobs (type (default='process'), identifier,
+            status, process_id, job_start_datetime, job_end_datetime, location,
+            mimetype, message, progress)
         """
 
         LOGGER.debug('Querying for jobs')
@@ -140,11 +128,7 @@ class PostgreSQLManager(BaseManager):
                 column = getattr(self.table_model, 'status')
                 results = results.filter(column == status.value)
 
-            jobs = [r.__dict__ for r in results.all()]
-            return {
-                'jobs': jobs,
-                'numberMatched': len(jobs)
-            }
+            return [r.__dict__ for r in results.all()]
 
     def add_job(self, job_metadata: dict) -> str:
         """
@@ -295,13 +279,8 @@ class PostgreSQLManager(BaseManager):
         else:
             try:
                 location = Path(location)
-                if mimetype in (None, FORMAT_TYPES[F_JSON],
-                                FORMAT_TYPES[F_JSONLD]):
-                    with location.open('r', encoding='utf-8') as fh:
-                        result = json.load(fh)
-                else:
-                    with location.open('rb') as fh:
-                        result = fh.read()
+                with location.open(encoding='utf-8') as fh:
+                    result = json.load(fh)
             except (TypeError, FileNotFoundError, json.JSONDecodeError):
                 raise JobResultNotFoundError()
             else:

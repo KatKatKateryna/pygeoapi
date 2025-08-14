@@ -27,7 +27,6 @@
 #
 # =================================================================
 
-import pydantic
 from pydantic import BaseModel
 from typing import List, Optional
 
@@ -51,10 +50,3 @@ class MVTTilesJson(BaseModel):
     attribution: Optional[str] = None
     description: Optional[str] = None
     vector_layers: Optional[List[VectorLayers]] = None
-
-
-if pydantic.VERSION.startswith('1'):
-    def _dump(self, *, exclude_none: bool = False, **kwargs):
-        return self.dict(exclude_none=exclude_none, **kwargs)
-
-    MVTTilesJson.model_dump = _dump

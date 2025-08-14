@@ -35,7 +35,6 @@ from mapscript import MapServerError
 
 from pygeoapi.provider.base import (BaseProvider, ProviderConnectionError,
                                     ProviderQueryError)
-from pygeoapi.util import str2bool
 
 LOGGER = logging.getLogger(__name__)
 
@@ -75,17 +74,13 @@ class MapScriptProvider(BaseProvider):
 
             file_extension = self.data.split('.')[-1]
 
-            if str2bool(self.options.get('tileindex', False)):
-                LOGGER.debug('Setting tileindex')
-                self._layer.tileindex = self.data
+            if file_extension in ['shp', 'tif']:
+                LOGGER.debug('Setting built-in MapServer driver')
+                self._layer.data = self.data
             else:
-                if file_extension in ['shp', 'tif']:
-                    LOGGER.debug('Setting built-in MapServer driver')
-                    self._layer.data = self.data
-                else:
-                    LOGGER.debug('Setting OGR driver')
-                    self._layer.setConnectionType(mapscript.MS_OGR, 'OGR')
-                    self._layer.connection = self.data
+                LOGGER.debug('Setting OGR driver')
+                self._layer.setConnectionType(mapscript.MS_OGR, 'OGR')
+                self._layer.connection = self.data
 
             self._layer.type = getattr(mapscript, self.options['type'])
 
@@ -115,9 +110,6 @@ class MapScriptProvider(BaseProvider):
                     cls_def = 'CLASS NAME "default" STYLE COLOR 0 0 0 END END'
                     cls.updateFromString(cls_def)
                     self._layer.insertClass(cls)
-
-            if self.options['type'] == 'MS_LAYER_RASTER':
-                self._layer.addProcessing('SCALE=AUTO')
 
         except MapServerError as err:
             LOGGER.warning(err)

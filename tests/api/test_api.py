@@ -40,14 +40,13 @@ import pytest
 
 from pygeoapi.api import (
     API, APIRequest, FORMAT_TYPES, F_HTML, F_JSON, F_JSONLD, F_GZIP,
-    __version__, validate_bbox, validate_datetime, evaluate_limit,
-    validate_subset, landing_page, openapi_, conformance, describe_collections,
-    get_collection_schema,
+    __version__, validate_bbox, validate_datetime,
+    validate_subset
 )
 from pygeoapi.util import yaml_load, get_api_rules, get_base_url
 
-from tests.util import (get_test_file_path, mock_api_request, mock_flask,
-                        mock_starlette, mock_request)
+from tests.util import (get_test_file_path, mock_flask, mock_starlette,
+                        mock_request)
 
 
 @pytest.fixture()
@@ -172,7 +171,7 @@ def test_apirequest(api_):
     # Test data
     for d in (None, '', 'test', {'key': 'value'}):
         req = mock_request(data=d)
-        apireq = APIRequest.from_flask(req, api_.locales)
+        apireq = APIRequest.with_data(req, api_.locales)
         if not d:
             assert apireq.data == b''
         elif isinstance(d, dict):
@@ -357,12 +356,12 @@ def test_apirules_inactive(config, api_):
         assert 'X-API-Version' not in response.headers
 
 
-def test_openapi(config, api_, openapi):
+def test_api(config, api_, openapi):
     assert api_.config == config
     assert isinstance(api_.config, dict)
 
-    req = mock_api_request(HTTP_ACCEPT='application/json')
-    rsp_headers, code, response = openapi_(api_, req)
+    req = mock_request(HTTP_ACCEPT='application/json')
+    rsp_headers, code, response = api_.openapi_(req)
     assert rsp_headers['Content-Type'] == 'application/vnd.oai.openapi+json;version=3.0'  # noqa
     # No language requested: should be set to default from YAML
     assert rsp_headers['Content-Language'] == 'en-US'
@@ -370,123 +369,140 @@ def test_openapi(config, api_, openapi):
     assert isinstance(root, dict)
 
     a = 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
-    req = mock_api_request(HTTP_ACCEPT=a)
-    rsp_headers, code, response = openapi_(api_, req)
+    req = mock_request(HTTP_ACCEPT=a)
+    rsp_headers, code, response = api_.openapi_(req)
     assert rsp_headers['Content-Type'] == FORMAT_TYPES[F_HTML] == \
            FORMAT_TYPES[F_HTML]
 
     assert 'Swagger UI' in response
 
     a = 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
-    req = mock_api_request({'ui': 'redoc'}, HTTP_ACCEPT=a)
-    rsp_headers, code, response = openapi_(api_, req)
+    req = mock_request({'ui': 'redoc'}, HTTP_ACCEPT=a)
+    rsp_headers, code, response = api_.openapi_(req)
     assert rsp_headers['Content-Type'] == FORMAT_TYPES[F_HTML] == \
            FORMAT_TYPES[F_HTML]
 
     assert 'ReDoc' in response
 
+    req = mock_request({'f': 'foo'})
+    rsp_headers, code, response = api_.openapi_(req)
+    assert rsp_headers['Content-Language'] == 'en-US'
+    assert code == HTTPStatus.BAD_REQUEST
+
     assert api_.get_collections_url() == 'http://localhost:5000/collections'
 
 
 def test_api_exception(config, api_):
+    req = mock_request({'f': 'foo'})
+    rsp_headers, code, response = api_.landing_page(req)
+    assert rsp_headers['Content-Language'] == 'en-US'
+    assert code == HTTPStatus.BAD_REQUEST
 
-    with mock_flask('pygeoapi-test-config.yml') as flask_client:
-        response = flask_client.get('?f=foo')
-        assert response.status_code == HTTPStatus.BAD_REQUEST
-        assert response.headers['Content-Language'] == 'en-US'
-
-        # When a language is set, the exception should still be English
-        response = flask_client.get('?f=foo&lang=fr')
-        assert response.status_code == HTTPStatus.BAD_REQUEST
-        assert response.headers['Content-Language'] == 'en-US'
-
-    with mock_starlette('pygeoapi-test-config.yml') as starlette_client:
-        response = starlette_client.get('?f=foo')
-        assert response.status_code == HTTPStatus.BAD_REQUEST
-        assert response.headers['Content-Language'] == 'en-US'
-
-        # When a language is set, the exception should still be English
-        response = starlette_client.get('?f=foo&lang=fr')
-        assert response.status_code == HTTPStatus.BAD_REQUEST
-        assert response.headers['Content-Language'] == 'en-US'
+    # When a language is set, the exception should still be English
+    req = mock_request({'f': 'foo', 'lang': 'fr'})
+    rsp_headers, code, response = api_.landing_page(req)
+    assert rsp_headers['Content-Language'] == 'en-US'
+    assert code == HTTPStatus.BAD_REQUEST
 
 
-def test_gzip(config, openapi):
+def test_gzip(config, api_, openapi):
+    # Requests for each response type and gzip encoding
+    req_gzip_json = mock_request(HTTP_ACCEPT=FORMAT_TYPES[F_JSON],
+                                 HTTP_ACCEPT_ENCODING=F_GZIP)
+    req_gzip_jsonld = mock_request(HTTP_ACCEPT=FORMAT_TYPES[F_JSONLD],
+                                   HTTP_ACCEPT_ENCODING=F_GZIP)
+    req_gzip_html = mock_request(HTTP_ACCEPT=FORMAT_TYPES[F_HTML],
+                                 HTTP_ACCEPT_ENCODING=F_GZIP)
+    req_gzip_gzip = mock_request(HTTP_ACCEPT='application/gzip',
+                                 HTTP_ACCEPT_ENCODING=F_GZIP)
 
-    common = {'Accept_Encoding': F_GZIP}
-    headers_gzip_json = {**common, 'Accept': FORMAT_TYPES[F_JSON]}
-    headers_gzip_jsonld = {**common, 'Accept': FORMAT_TYPES[F_JSONLD]}
-    headers_gzip_html = {**common, 'Accept': FORMAT_TYPES[F_HTML]}
-    headers_gzip_gzip = {**common, 'Accept': 'application/gzip'}
+    # Responses from server config without gzip compression
+    rsp_headers, _, rsp_json = api_.landing_page(req_gzip_json)
+    assert rsp_headers['Content-Type'] == FORMAT_TYPES[F_JSON]
+    rsp_headers, _, rsp_jsonld = api_.landing_page(req_gzip_jsonld)
+    assert rsp_headers['Content-Type'] == FORMAT_TYPES[F_JSONLD]
+    rsp_headers, _, rsp_html = api_.landing_page(req_gzip_html)
+    assert rsp_headers['Content-Type'] == FORMAT_TYPES[F_HTML]
+    rsp_headers, _, _ = api_.landing_page(req_gzip_gzip)
+    assert rsp_headers['Content-Type'] == FORMAT_TYPES[F_JSON]
 
-    with mock_flask('pygeoapi-test-config.yml') as flask_client:
-        response_json = flask_client.get("", headers=headers_gzip_json)
-        assert response_json.headers['Content-Type'] == FORMAT_TYPES[F_JSON]
+    # Add gzip to server and use utf-16 encoding
+    config['server']['gzip'] = True
+    enc_16 = 'utf-16'
+    config['server']['encoding'] = enc_16
+    api_ = API(config, openapi)
 
-        response_jsonld = flask_client.get("", headers=headers_gzip_jsonld)
-        assert response_jsonld.headers['Content-Type'] == \
-            FORMAT_TYPES[F_JSONLD]
+    # Responses from server with gzip compression
+    rsp_json_headers, _, rsp_gzip_json = api_.landing_page(req_gzip_json)
+    rsp_jsonld_headers, _, rsp_gzip_jsonld = api_.landing_page(req_gzip_jsonld)
+    rsp_html_headers, _, rsp_gzip_html = api_.landing_page(req_gzip_html)
+    rsp_gzip_headers, _, rsp_gzip_gzip = api_.landing_page(req_gzip_gzip)
 
-        response_html = flask_client.get("", headers=headers_gzip_html)
-        assert response_html.headers['Content-Type'] == FORMAT_TYPES[F_HTML]
+    # Validate compressed json response
+    assert rsp_json_headers['Content-Type'] == \
+        f'{FORMAT_TYPES[F_JSON]}; charset={enc_16}'
+    assert rsp_json_headers['Content-Encoding'] == F_GZIP
 
-        response_gzip = flask_client.get("", headers=headers_gzip_gzip)
-        assert response_gzip.headers['Content-Type'] == FORMAT_TYPES[F_JSON]
+    parsed_gzip_json = gzip.decompress(rsp_gzip_json).decode(enc_16)
+    assert isinstance(parsed_gzip_json, str)
+    parsed_gzip_json = json.loads(parsed_gzip_json)
+    assert isinstance(parsed_gzip_json, dict)
+    assert parsed_gzip_json == json.loads(rsp_json)
 
-    with mock_flask('pygeoapi-test-config.yml') as flask_client:
-        from pygeoapi import flask_app
+    # Validate compressed jsonld response
+    assert rsp_jsonld_headers['Content-Type'] == \
+        f'{FORMAT_TYPES[F_JSONLD]}; charset={enc_16}'
+    assert rsp_jsonld_headers['Content-Encoding'] == F_GZIP
 
-        # Add gzip to server and use utf-16 encoding
-        config['server']['gzip'] = True
-        enc_16 = 'utf-16'
-        config['server']['encoding'] = enc_16
-        flask_app.api_ = API(config, openapi)
+    parsed_gzip_jsonld = gzip.decompress(rsp_gzip_jsonld).decode(enc_16)
+    assert isinstance(parsed_gzip_jsonld, str)
+    parsed_gzip_jsonld = json.loads(parsed_gzip_jsonld)
+    assert isinstance(parsed_gzip_jsonld, dict)
+    assert parsed_gzip_jsonld == json.loads(rsp_jsonld)
 
-        response = flask_client.get("", headers=headers_gzip_json)
-        # Validate compressed json response
-        assert response.headers['Content-Type'] == \
-            f'{FORMAT_TYPES[F_JSON]}; charset={enc_16}'
-        assert response.headers['Content-Encoding'] == F_GZIP
-        parsed_gzip_json = gzip.decompress(response.data).decode(enc_16)
-        assert isinstance(parsed_gzip_json, str)
-        parsed_gzip_json = json.loads(parsed_gzip_json)
-        assert isinstance(parsed_gzip_json, dict)
-        assert parsed_gzip_json == response_json.json
+    # Validate compressed html response
+    assert rsp_html_headers['Content-Type'] == \
+        f'{FORMAT_TYPES[F_HTML]}; charset={enc_16}'
+    assert rsp_html_headers['Content-Encoding'] == F_GZIP
 
-        # Validate compressed jsonld response
-        response = flask_client.get("", headers=headers_gzip_jsonld)
-        assert response.headers['Content-Type'] == \
-            f'{FORMAT_TYPES[F_JSONLD]}; charset={enc_16}'
-        assert response.headers['Content-Encoding'] == F_GZIP
-        parsed_gzip_jsonld = gzip.decompress(response.data).decode(enc_16)
-        assert isinstance(parsed_gzip_jsonld, str)
-        parsed_gzip_jsonld = json.loads(parsed_gzip_jsonld)
-        assert isinstance(parsed_gzip_jsonld, dict)
-        assert parsed_gzip_jsonld == response_jsonld.json
+    parsed_gzip_html = gzip.decompress(rsp_gzip_html).decode(enc_16)
+    assert isinstance(parsed_gzip_html, str)
+    assert parsed_gzip_html == rsp_html
 
-        # Validate compressed html response
-        response = flask_client.get("", headers=headers_gzip_html)
-        assert response.headers['Content-Type'] == \
-            f'{FORMAT_TYPES[F_HTML]}; charset={enc_16}'
-        assert response.headers['Content-Encoding'] == F_GZIP
-        parsed_gzip_html = gzip.decompress(response.data).decode(enc_16)
-        assert isinstance(parsed_gzip_html, str)
-        assert parsed_gzip_html == response_html.text
+    # Validate compressed gzip response
+    assert rsp_gzip_headers['Content-Type'] == \
+        f'{FORMAT_TYPES[F_GZIP]}; charset={enc_16}'
+    assert rsp_gzip_headers['Content-Encoding'] == F_GZIP
 
-        # Validate compressed gzip response
-        response = flask_client.get("", headers=headers_gzip_gzip)
-        assert response.headers['Content-Type'] == \
-            f'{FORMAT_TYPES[F_GZIP]}; charset={enc_16}'
-        assert response.headers['Content-Encoding'] == F_GZIP
-        parsed_gzip_gzip = gzip.decompress(response.data).decode(enc_16)
-        assert isinstance(parsed_gzip_gzip, str)
-        parsed_gzip_gzip = json.loads(parsed_gzip_gzip)
-        assert isinstance(parsed_gzip_gzip, dict)
+    parsed_gzip_gzip = gzip.decompress(rsp_gzip_gzip).decode(enc_16)
+    assert isinstance(parsed_gzip_gzip, str)
+    parsed_gzip_gzip = json.loads(parsed_gzip_gzip)
+    assert isinstance(parsed_gzip_gzip, dict)
+
+    # Requests without content encoding header
+    req_json = mock_request(HTTP_ACCEPT=FORMAT_TYPES[F_JSON])
+    req_jsonld = mock_request(HTTP_ACCEPT=FORMAT_TYPES[F_JSONLD])
+    req_html = mock_request(HTTP_ACCEPT=FORMAT_TYPES[F_HTML])
+
+    # Responses without content encoding
+    _, _, rsp_json_ = api_.landing_page(req_json)
+    _, _, rsp_jsonld_ = api_.landing_page(req_jsonld)
+    _, _, rsp_html_ = api_.landing_page(req_html)
+
+    # Confirm each request is the same when decompressed
+    assert rsp_json_ == rsp_json == \
+        gzip.decompress(rsp_gzip_json).decode(enc_16)
+
+    assert rsp_jsonld_ == rsp_jsonld == \
+        gzip.decompress(rsp_gzip_jsonld).decode(enc_16)
+
+    assert rsp_html_ == rsp_html == \
+        gzip.decompress(rsp_gzip_html).decode(enc_16)
 
 
 def test_root(config, api_):
-    req = mock_api_request()
-    rsp_headers, code, response = landing_page(api_, req)
+    req = mock_request()
+    rsp_headers, code, response = api_.landing_page(req)
     root = json.loads(response)
 
     assert rsp_headers['Content-Type'] == 'application/json' == \
@@ -512,15 +528,15 @@ def test_root(config, api_):
     assert 'description' in root
     assert root['description'] == 'pygeoapi provides an API to geospatial data'
 
-    req = mock_api_request({'f': 'html'})
-    rsp_headers, code, response = landing_page(api_, req)
+    req = mock_request({'f': 'html'})
+    rsp_headers, code, response = api_.landing_page(req)
     assert rsp_headers['Content-Type'] == FORMAT_TYPES[F_HTML]
     assert rsp_headers['Content-Language'] == 'en-US'
 
 
 def test_root_structured_data(config, api_):
-    req = mock_api_request({"f": "jsonld"})
-    rsp_headers, code, response = landing_page(api_, req)
+    req = mock_request({"f": "jsonld"})
+    rsp_headers, code, response = api_.landing_page(req)
     root = json.loads(response)
 
     assert rsp_headers['Content-Type'] == 'application/ld+json' == \
@@ -550,41 +566,49 @@ def test_root_structured_data(config, api_):
 
 
 def test_conformance(config, api_):
-    req = mock_api_request()
-    rsp_headers, code, response = conformance(api_, req)
+    req = mock_request()
+    rsp_headers, code, response = api_.conformance(req)
     root = json.loads(response)
 
     assert isinstance(root, dict)
     assert 'conformsTo' in root
-    assert len(root['conformsTo']) == 42
+    assert len(root['conformsTo']) == 37
     assert 'http://www.opengis.net/spec/ogcapi-features-2/1.0/conf/crs' \
            in root['conformsTo']
 
-    req = mock_api_request({'f': 'html'})
-    rsp_headers, code, response = conformance(api_, req)
+    req = mock_request({'f': 'foo'})
+    rsp_headers, code, response = api_.conformance(req)
+    assert code == HTTPStatus.BAD_REQUEST
+
+    req = mock_request({'f': 'html'})
+    rsp_headers, code, response = api_.conformance(req)
     assert rsp_headers['Content-Type'] == FORMAT_TYPES[F_HTML]
     # No language requested: should be set to default from YAML
     assert rsp_headers['Content-Language'] == 'en-US'
 
 
 def test_describe_collections(config, api_):
-    req = mock_api_request({"f": "html"})
-    rsp_headers, code, response = describe_collections(api_, req)
+    req = mock_request({"f": "foo"})
+    rsp_headers, code, response = api_.describe_collections(req)
+    assert code == HTTPStatus.BAD_REQUEST
+
+    req = mock_request({"f": "html"})
+    rsp_headers, code, response = api_.describe_collections(req)
     assert rsp_headers['Content-Type'] == FORMAT_TYPES[F_HTML]
 
-    req = mock_api_request()
-    rsp_headers, code, response = describe_collections(api_, req)
+    req = mock_request()
+    rsp_headers, code, response = api_.describe_collections(req)
     collections = json.loads(response)
 
     assert len(collections) == 2
-    assert len(collections['collections']) == 10
+    assert len(collections['collections']) == 9
     assert len(collections['links']) == 3
 
-    rsp_headers, code, response = describe_collections(api_, req, 'foo')
+    rsp_headers, code, response = api_.describe_collections(req, 'foo')
     collection = json.loads(response)
     assert code == HTTPStatus.NOT_FOUND
 
-    rsp_headers, code, response = describe_collections(api_, req, 'obs')
+    rsp_headers, code, response = api_.describe_collections(req, 'obs')
     collection = json.loads(response)
 
     assert rsp_headers['Content-Language'] == 'en-US'
@@ -614,13 +638,13 @@ def test_describe_collections(config, api_):
     ]
     for crs in crs_set:
         assert crs in collection['crs']
-    assert collection['storageCrs'] is not None
-    assert collection['storageCrs'] == 'http://www.opengis.net/def/crs/OGC/1.3/CRS84' # noqa
+    assert collection['storageCRS'] is not None
+    assert collection['storageCRS'] == 'http://www.opengis.net/def/crs/OGC/1.3/CRS84' # noqa
     assert 'storageCrsCoordinateEpoch' not in collection
 
     # French language request
-    req = mock_api_request({'lang': 'fr'})
-    rsp_headers, code, response = describe_collections(api_, req, 'obs')
+    req = mock_request({'lang': 'fr'})
+    rsp_headers, code, response = api_.describe_collections(req, 'obs')
     collection = json.loads(response)
 
     assert rsp_headers['Content-Language'] == 'fr-CA'
@@ -628,15 +652,15 @@ def test_describe_collections(config, api_):
     assert collection['description'] == 'Mes belles observations'
 
     # Check HTML request in an unsupported language
-    req = mock_api_request({'f': 'html', 'lang': 'de'})
-    rsp_headers, code, response = describe_collections(api_, req, 'obs')
+    req = mock_request({'f': 'html', 'lang': 'de'})
+    rsp_headers, code, response = api_.describe_collections(req, 'obs')
     assert rsp_headers['Content-Type'] == FORMAT_TYPES[F_HTML]
     assert rsp_headers['Content-Language'] == 'en-US'
 
     # hiearchical collections
-    req = mock_api_request()
-    rsp_headers, code, response = describe_collections(
-        api_, req, 'naturalearth/lakes')
+    req = mock_request()
+    rsp_headers, code, response = api_.describe_collections(
+        req, 'naturalearth/lakes')
 
     collection = json.loads(response)
     assert collection['id'] == 'naturalearth/lakes'
@@ -652,15 +676,15 @@ def test_describe_collections(config, api_):
         if crs in default_crs_list:
             contains_default = True
     assert contains_default
-    assert collection['storageCrs'] is not None
-    assert collection['storageCrs'] == 'http://www.opengis.net/def/crs/OGC/1.3/CRS84' # noqa
+    assert collection['storageCRS'] is not None
+    assert collection['storageCRS'] == 'http://www.opengis.net/def/crs/OGC/1.3/CRS84' # noqa
     assert collection['storageCrsCoordinateEpoch'] == 2017.23
 
 
 def test_describe_collections_hidden_resources(
         config_hidden_resources, api_hidden_resources):
-    req = mock_api_request({})
-    rsp_headers, code, response = describe_collections(api_hidden_resources, req)  # noqa
+    req = mock_request({})
+    rsp_headers, code, response = api_hidden_resources.describe_collections(req)  # noqa
     assert code == HTTPStatus.OK
 
     assert len(config_hidden_resources['resources']) == 3
@@ -670,8 +694,8 @@ def test_describe_collections_hidden_resources(
 
 
 def test_describe_collections_json_ld(config, api_):
-    req = mock_api_request({'f': 'jsonld'})
-    rsp_headers, code, response = describe_collections(api_, req, 'obs')
+    req = mock_request({'f': 'jsonld'})
+    rsp_headers, code, response = api_.describe_collections(req, 'obs')
     collection = json.loads(response)
 
     assert '@context' in collection
@@ -711,8 +735,8 @@ def test_describe_collections_enclosures(config_enclosure, enclosure_api):
         if lnk['rel'] == 'enclosure'
     }
 
-    req = mock_api_request()
-    _, _, response = describe_collections(enclosure_api, req, 'objects')
+    req = mock_request()
+    _, _, response = enclosure_api.describe_collections(req, 'objects')
     features = json.loads(response)
     modified_enclosures = {
         lnk['title']: lnk for lnk in features['links']
@@ -736,16 +760,16 @@ def test_describe_collections_enclosures(config_enclosure, enclosure_api):
 
 
 def test_get_collection_schema(config, api_):
-    req = mock_api_request()
-    rsp_headers, code, response = get_collection_schema(api_, req, 'notfound')
+    req = mock_request()
+    rsp_headers, code, response = api_.get_collection_schema(req, 'notfound')
     assert code == HTTPStatus.NOT_FOUND
 
-    req = mock_api_request({'f': 'html'})
-    rsp_headers, code, response = get_collection_schema(api_, req, 'obs')
+    req = mock_request({'f': 'html'})
+    rsp_headers, code, response = api_.get_collection_schema(req, 'obs')
     assert rsp_headers['Content-Type'] == FORMAT_TYPES[F_HTML]
 
-    req = mock_api_request({'f': 'json'})
-    rsp_headers, code, response = get_collection_schema(api_, req, 'obs')
+    req = mock_request({'f': 'json'})
+    rsp_headers, code, response = api_.get_collection_schema(req, 'obs')
     assert rsp_headers['Content-Type'] == 'application/schema+json'
     schema = json.loads(response)
 
@@ -848,42 +872,3 @@ def test_get_exception(config, api_):
     assert content['description'] == 'oops'
 
     d = api_.get_exception(500, {}, 'html', 'NoApplicableCode', 'oops')
-
-
-def test_evaluate_limit():
-    collection = {}
-    server = {}
-
-    with pytest.raises(ValueError):
-        assert evaluate_limit('1.1', server, collection) == 10
-
-    with pytest.raises(ValueError):
-        assert evaluate_limit('-12', server, collection) == 10
-
-    assert evaluate_limit('1', server, collection) == 1
-
-    collection = {}
-    server = {'default_items': 2, 'max_items': 3}
-
-    assert evaluate_limit(None, server, collection) == 2
-    assert evaluate_limit('1', server, collection) == 1
-    assert evaluate_limit('4', server, collection) == 3
-
-    collection = {'default_items': 10, 'max_items': 50}
-    server = {'default_items': 100, 'max_items': 1000}
-
-    assert evaluate_limit(None, server, collection) == 10
-    assert evaluate_limit('40', server, collection) == 40
-    assert evaluate_limit('60', server, collection) == 50
-
-    collection = {}
-    server = {'default_items': 2, 'max_items': 3, 'on_exceed': 'error'}
-
-    with pytest.raises(ValueError):
-        assert evaluate_limit('40', server, collection) == 40
-
-    collection = {'default_items': 10}
-    server = {'default_items': 2, 'max_items': 3}
-
-    assert evaluate_limit(None, server, collection) == 10
-    assert evaluate_limit('40', server, collection) == 3

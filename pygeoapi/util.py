@@ -35,10 +35,9 @@ from filelock import FileLock
 import functools
 from functools import partial
 from dataclasses import dataclass
-from datetime import date, datetime, time, timezone
+from datetime import date, datetime, time
 from decimal import Decimal
 from enum import Enum
-from heapq import heappush
 import json
 import logging
 import mimetypes
@@ -52,15 +51,6 @@ from urllib.request import urlopen
 import uuid
 
 import dateutil.parser
-from babel.support import Translations
-from jinja2 import Environment, FileSystemLoader, select_autoescape
-from jinja2.exceptions import TemplateNotFound
-import pyproj
-import pygeofilter.ast
-import pygeofilter.values
-from pyproj.exceptions import CRSError
-from requests import Session
-from requests.structures import CaseInsensitiveDict
 from shapely import ops
 from shapely.geometry import (
     box,
@@ -76,6 +66,14 @@ from shapely.geometry import (
     mapping as geom_to_geojson,
 )
 import yaml
+from babel.support import Translations
+from jinja2 import Environment, FileSystemLoader, select_autoescape
+import pygeofilter.ast
+import pygeofilter.values
+import pyproj
+from pyproj.exceptions import CRSError
+from requests import Session
+from requests.structures import CaseInsensitiveDict
 
 from pygeoapi import __version__
 from pygeoapi import l10n
@@ -129,13 +127,13 @@ def dategetter(date_property: str, collection: dict) -> str:
 
     value = collection.get(date_property)
 
-    if value is None or isinstance(value, str):
-        return value
-    else:
-        return value.isoformat()
+    if value is None:
+        return None
+
+    return value.isoformat()
 
 
-def get_typed_value(value: str) -> Union[bool, float, int, str]:
+def get_typed_value(value: str) -> Union[float, int, str]:
     """
     Derive true type from data value
 
@@ -149,8 +147,6 @@ def get_typed_value(value: str) -> Union[bool, float, int, str]:
             value2 = float(value)
         elif len(value) > 1 and value.startswith('0'):
             value2 = value
-        elif value.lower() in ['true', 'false']:
-            value2 = str2bool(value)
         else:  # int?
             value2 = int(value)
     except ValueError:  # string (default)?
@@ -172,7 +168,7 @@ def yaml_load(fh: IO) -> dict:
     # # https://stackoverflow.com/a/55301129
 
     env_matcher = re.compile(
-        r'.*?\$\{(?P<varname>\w+)(:-(?P<default>[^}]*))?\}')
+        r'.*?\$\{(?P<varname>\w+)(:-(?P<default>[^}]+))?\}')
 
     def env_constructor(loader, node):
         result = ""
@@ -303,11 +299,6 @@ def format_datetime(value: str, format_: str = DATETIME_FORMAT) -> str:
     return dateutil.parser.isoparse(value).strftime(format_)
 
 
-def get_current_datetime(tz: timezone = timezone.utc,
-                         format_: str = DATETIME_FORMAT) -> str:
-    return datetime.now(tz).strftime(format_)
-
-
 def file_modified_iso8601(filepath: Path) -> str:
     """
     Provide a file's ctime in ISO8601
@@ -435,13 +426,12 @@ def is_url(urlstring: str) -> bool:
         return False
 
 
-def render_j2_template(config: dict, tpl_config: dict, template: Path,
+def render_j2_template(config: dict, template: Path,
                        data: dict, locale_: str = None) -> str:
     """
     render Jinja2 template
 
     :param config: dict of configuration
-    :param tpl_config: dict of template configuration
     :param template: template (relative path)
     :param data: dict of data
     :param locale_: the requested output Locale
@@ -455,7 +445,7 @@ def render_j2_template(config: dict, tpl_config: dict, template: Path,
     LOGGER.debug(f'Locale directory: {locale_dir}')
 
     try:
-        templates = tpl_config['path']
+        templates = config['server']['templates']['path']
         template_paths.insert(0, templates)
         LOGGER.debug(f'using custom templates: {templates}')
     except (KeyError, TypeError):
@@ -483,12 +473,7 @@ def render_j2_template(config: dict, tpl_config: dict, template: Path,
     translations = Translations.load(locale_dir, [locale_])
     env.install_gettext_translations(translations)
 
-    try:
-        template = env.get_template(template)
-    except TemplateNotFound:
-        LOGGER.debug(f'template {template} not found')
-        template_paths.remove(templates)
-        template = env.get_template(template)
+    template = env.get_template(template)
 
     return template.render(config=l10n.translate_struct(config, locale_, True),
                            data=data, locale=locale_, version=__version__)
@@ -610,11 +595,6 @@ class ProcessExecutionMode(Enum):
 class RequestedProcessExecutionMode(Enum):
     wait = 'wait'
     respond_async = 'respond-async'
-
-
-class RequestedResponse(Enum):
-    raw = 'raw'
-    document = 'document'
 
 
 class JobStatus(Enum):
@@ -1055,58 +1035,3 @@ def _inplace_replace_geometry_filter_name(
             else:
                 _inplace_replace_geometry_filter_name(
                     sub_node, geometry_column_name)
-
-
-def get_from_headers(headers: dict, header_name: str) -> str:
-    """
-    Gets case insensitive value from dictionary.
-    This is particularly useful when trying to get
-    headers from Starlette and Flask without issue
-
-    :param headers: `dict` of request headers.
-    :param header_name: Name of request header.
-
-    :returns: `str` value of header
-    """
-
-    cleaned_headers = {k.strip().lower(): v for k, v in headers.items()}
-    return cleaned_headers.get(header_name.lower(), '')
-
-
-def get_choice_from_headers(headers: dict,
-                            header_name: str,
-                            all: bool = False) -> Union[str, List[str]]:
-    """
-    Gets choices from a request dictionary,
-    considering numerical ordering of preferences.
-    Supported are complex preference strings (e.g. "fr-CH, fr;q=0.9, en;q=0.8")
-
-    :param headers: `dict` of request headers.
-    :param header_name: Name of request header.
-    :param all: bool to return one or all header values.
-
-    :returns: Sorted choice or choices from header
-    """
-
-    # Select header of interest
-    header = get_from_headers(headers=headers, header_name=header_name)
-    if header == '':
-        return
-
-    # Parse choices, extracting optional q values (defaults to 1.0)
-    choices = []
-    for i, part in enumerate(header.split(',')):
-        match = re.match(r'^([^;]+)(?:;q=([\d.]+))?$', part.strip())
-        if match:
-            value, q_value = match.groups()
-            q_value = float(q_value) if q_value else 1.0
-
-            # Sort choices by q value and index
-            if 0 <= q_value <= 1:
-                heappush(choices, (1 / q_value, i, value))
-
-    # Drop q value
-    sorted_choices = [choice[-1] for choice in choices]
-
-    # Return one or all choices
-    return sorted_choices if all else sorted_choices[0]

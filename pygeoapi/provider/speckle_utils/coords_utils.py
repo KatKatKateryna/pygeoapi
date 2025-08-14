@@ -1,0 +1,149 @@
+
+import copy
+import math
+from typing import List
+from pygeoapi.provider.speckle_utils.legal import COUNTRY_CODES, STATES, POSTCODES
+
+
+def reproject_bulk(self, all_coords: List[List[List[float]]], all_coord_counts: List[List[None| List[int]]], geometries) -> None:
+    """Reproject coordinates and assign to corresponding geometries."""
+
+    from datetime import datetime
+
+    # reproject all coords
+    time1 = datetime.now()
+    flat_coords = reproject_2d_coords_list(self, all_coords)
+    time2 = datetime.now()
+    time_operation = (time2-time1).total_seconds()
+    self.times["time_reproject"] = time_operation
+
+    validate_coords(self, flat_coords[0])
+    if len(flat_coords)>2:
+        validate_coords(self, flat_coords[len(flat_coords)-1])
+
+    # define type of features
+    feat_coord_group_is_multi = [True if None in x else False for x in all_coord_counts]
+
+    feat_coord_group_counts = [[ y for y in x if y is not None] for x in all_coord_counts]
+    feat_coord_group_counts_per_part = [[ sum(y) for y in x if y is not None] for x in all_coord_counts]
+
+    feat_coord_group_flat_counts: List[int] = [sum([ sum(y) for y in x if y is not None]) for x in all_coord_counts]
+    
+    feat_coord_groups = [flat_coords[sum(feat_coord_group_flat_counts[:i]):sum(feat_coord_group_flat_counts[:i])+x] for i, x in enumerate(feat_coord_group_flat_counts)]
+
+    for i, geometry in enumerate(geometries):
+        geometry["coordinates"] = []
+        if feat_coord_group_is_multi[i] is False:
+            
+            if geometry["type"] == "Point":
+                geometry["coordinates"].extend(feat_coord_groups[i][0])
+            else:
+                geometry["coordinates"].extend(feat_coord_groups[i])
+        else:
+            polygon_parts = []
+            local_coords_count: List[List[int]] = feat_coord_group_counts[i]
+            local_coords_count_flat: List[int] = feat_coord_group_counts_per_part[i]
+            local_flat_coords: List[int] = feat_coord_groups[i]
+
+            for c, poly_part_count_lists in enumerate(local_coords_count):
+                poly_part = []
+                start_index = sum(local_coords_count_flat[:c]) if c!=0 else 0 # all used coords in all parts
+
+                for part_count in poly_part_count_lists:
+                    range_coords_indices = range(start_index, start_index + part_count)
+                    
+                    if geometry["type"] == "MultiPoint":
+                        poly_part.extend([local_flat_coords[ind] for ind in range_coords_indices])
+                    else:
+                        new_list = []
+                        for ind in range_coords_indices:
+                            try:
+                                new_list.append(local_flat_coords[ind])
+                            except Exception as e: # corrupted geometry, ignore altogether 
+                                new_list = []
+                                break
+                        if len(new_list)>0:
+                            poly_part.append(new_list)
+
+                    start_index += part_count
+                
+                if geometry["type"] in ["MultiPoint","MultiLineString"] :
+                    polygon_parts.extend(poly_part)
+                else:
+                    polygon_parts.append(poly_part)
+
+            geometry["coordinates"].extend(polygon_parts)
+    
+    time3 = datetime.now()
+
+    time_operation = (time3-time2).total_seconds()
+    self.times["time_reconstruct_geometry"] = time_operation
+    # print(f"Construct back geometry time: {time_operation}")
+
+def reproject_2d_coords_list(self, coords_in: List[List[float]]) -> List[List[float]]:
+    """Return coordinates in a CRS of SpeckleProvider."""
+
+    from pyproj import Transformer
+    from pyproj import CRS
+
+    coords_offset = offset_rotate(self, copy.deepcopy(coords_in))
+
+    transformer = Transformer.from_crs(
+        self.crs,
+        CRS.from_user_input(4326),
+        always_xy=True,
+    )
+    transformed = [[pt[0], pt[1], pt[2]] for pt in transformer.itransform(coords_offset)]
+    
+    all_x = [x[0] for x in transformed]
+    all_y = [x[1] for x in transformed]
+    all_z = [x[2] for x in transformed]
+    self.extent = [min(all_x), min(all_y), max(all_x), max(all_y)]
+    self.extent3d = [min(all_x), min(all_y), min(all_z), max(all_x), max(all_y), max(all_z)]
+    return transformed
+
+def offset_rotate(self, coords_in: List[list]) -> List[List[float]]:
+    """Apply offset and rotation to coordinates, according to SpeckleProvider CRS_dict."""
+
+    from specklepy.objects.units import get_scale_factor_from_string
+
+    scale_factor = 1
+    if isinstance(self.crs_dict["units_native"], str):
+        scale_factor = get_scale_factor_from_string(self.crs_dict["units_native"], "m")
+
+    final_coords = []
+    for coord in coords_in:
+        a = self.crs_dict["rotation"] * math.pi / 180
+        x2 = coord[0] * math.cos(a) - coord[1] * math.sin(a)
+        y2 = coord[0] * math.sin(a) + coord[1] * math.cos(a)
+        final_coords.append(
+            [
+                scale_factor * (x2 + self.crs_dict["offset_x"]),
+                scale_factor * (y2 + self.crs_dict["offset_y"]),
+                scale_factor * (coord[2]),
+            ]
+        )
+
+    return final_coords
+
+def validate_coords(self, coords):
+    from geopy.geocoders import Nominatim
+    country_code = ""
+    state = ""
+    postcode = ""
+    try:
+        geolocator = Nominatim(user_agent="specklePygeoapi")
+        coord = f"{coords[1]}, {coords[0]}"
+        location = geolocator.reverse(coord, exactly_one=True)
+        if location is not None:
+            address = location.raw['address']
+            country_code = address.get('country_code', '')
+            state = address.get('state', '')
+            postcode = address.get('postcode', '')
+    except Exception as e:
+        print(f"Error validating project location: {e}")
+    self.country_code = country_code
+    
+    if country_code in COUNTRY_CODES or state in STATES or postcode in POSTCODES:
+        print(f"Validating project location: blocked LAT LON {coords[1]}, {coords[0]}, {country_code}, {state}, {postcode}")
+        raise PermissionError("Review Speckle Terms and Conditions")

@@ -25,12 +25,6 @@ properties:
             url:
                 type: string
                 description: URL of server (as used by client)
-            icon:
-                type: string
-                description: URL of favicon for default HTML customization
-            logo:
-                type: string
-                description: URL of logo image for default HTML customization
             admin:
                 type: boolean
                 description: whether to enable the Admin API (default is false)
@@ -66,38 +60,8 @@ properties:
                 default: false
             limit:
                 type: integer
+                description: server limit on number of items to return
                 default: 10
-                description: "limit of items to return.  DEPRECATED: use limits instead"
-            limits: &x-limits
-                type: object
-                description: server level data limiting
-                properties:
-                    max_items:
-                        type: integer
-                        description: maximum limit of items to return for item type providers
-                        minimum: 1
-                        default: 10
-                    default_items:
-                        type: integer
-                        description: default limit of items to return for item type providers
-                        minimum: 1
-                        default: 10
-                    max_distance_x:
-                        type: number
-                        description: maximum distance in x for all data providers
-                    max_distance_y:
-                        type: number
-                        description: maximum distance in y for all data providers
-                    max_distance_units:
-                        type: string
-                        description: maximum distance units as per UCUM https://ucum.org/ucum#section-Tables-of-Terminal-Symbols
-                    on_exceed:
-                        type: string
-                        description: how to handle limit exceeding
-                        default: throttle
-                        enum:
-                            - error
-                            - throttle
             templates:
                 type: object
                 description: optional configuration to specify a different set of templates for HTML pages. Recommend using absolute paths. Omit this to use the default provided templates
@@ -372,6 +336,9 @@ properties:
                             type: object
                             description: linked data configuration
                             properties:
+                                item_template:
+                                    type: string
+                                    description: path to JSON-LD Jinja2 template
                                 context:
                                     type: array
                                     description: additional JSON-LD context
@@ -450,9 +417,6 @@ properties:
                                               default: 'http://www.opengis.net/def/uom/ISO-8601/0/Gregorian'
                               required:
                                   - spatial
-                          limits:
-                              <<: *x-limits
-                              description: collection level data limiting
                           providers:
                               type: array
                               description: required connection information
@@ -573,10 +537,6 @@ properties:
                                               year in the Gregorian calendar.
                                           example:
                                               2017-03-25 in the Gregorian calendar is epoch 2017.23
-                                      include_extra_query_parameters:
-                                          type: boolean
-                                          description: whether to include extra query parameters
-                                          default: false
                                   required:
                                       - type
                                       - name

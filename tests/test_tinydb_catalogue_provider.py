@@ -2,7 +2,7 @@
 #
 # Authors: Tom Kralidis <tomkralidis@gmail.com>
 #
-# Copyright (c) 2025 Tom Kralidis
+# Copyright (c) 2023 Tom Kralidis
 #
 # Permission is hereby granted, free of charge, to any person
 # obtaining a copy of this software and associated documentation
@@ -90,27 +90,6 @@ def config(tmp_path):
     }
 
 
-def test_domains(config):
-    p = TinyDBCatalogueProvider(config)
-
-    domains, current = p.get_domains()
-
-    assert current
-
-    expected_properties = ['created', 'description', 'title', 'type',
-                           'updated']
-
-    assert sorted(domains.keys()) == expected_properties
-
-    assert len(domains['created']) == 10
-
-    domains, current = p.get_domains(['type'])
-
-    assert current
-
-    assert list(domains.keys()) == ['type']
-
-
 def test_query(config):
     p = TinyDBCatalogueProvider(config)
 
@@ -133,10 +112,10 @@ def test_query(config):
         assert results['numberMatched'] == 6
         assert results['numberReturned'] == 6
 
-    results = p.query(q='Frost free')
-    assert len(results['features']) == 1
-    assert results['numberMatched'] == 1
-    assert results['numberReturned'] == 1
+    results = p.query(q='crops barley')
+    assert len(results['features']) == 2
+    assert results['numberMatched'] == 2
+    assert results['numberReturned'] == 2
 
     results = p.query(limit=1)
     assert len(results['features']) == 1

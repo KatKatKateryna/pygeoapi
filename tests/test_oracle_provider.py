@@ -62,15 +62,11 @@ class SqlManipulator:
         q,
         language,
         filterq,
-        extra_params
     ):
         sql = "ID = 10 AND :foo != :bar"
-        if extra_params.get("custom-auth") == "forbidden":
-            sql = f"{sql} AND 'auth' = 'you are not allowed'"
 
         if sql_query.find(" WHERE ") == -1:
             sql_query = sql_query.replace("#WHERE#", f" WHERE {sql}")
-
         else:
             sql_query = sql_query.replace("#WHERE#", f" AND {sql}")
 
@@ -634,23 +630,6 @@ def test_query_mandatory_properties_must_be_specified(config):
     p = OracleProvider(config)
     with pytest.raises(ProviderInvalidQueryError):
         p.query(properties=[("id", "123")])
-
-
-def test_extra_params_are_passed_to_sql_manipulator(config_manipulator):
-    extra_params = [("custom-auth", "forbidden")]
-
-    p = OracleProvider(config_manipulator)
-    response = p.query(properties=extra_params)
-
-    assert not response['features']
-
-
-def test_query_count_sql_manipulator(config_manipulator):
-    """Test query number of hits"""
-    p = OracleProvider(config_manipulator)
-    result = p.query(resulttype="hits")
-
-    assert result.get("numberMatched") == 1
 
 
 @pytest.fixture()

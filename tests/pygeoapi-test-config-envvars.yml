@@ -31,22 +31,18 @@ server:
     bind:
         host: 0.0.0.0
         port: ${PYGEOAPI_PORT}
-    url: ${PYGEOAPI_SERVER_URL:-http://localhost:5000/}
+    url: http://localhost:5000/
     mimetype: application/json; charset=UTF-8
     encoding: utf-8
     language: en-US
     gzip: false
     cors: true
     pretty_print: true
-    limits:
-        default_items: 10
-        max_items: 10
+    limit: 10
     # templates: /path/to/templates
     map:
-        url: https://tile.openstreetmap.org/{z}/{x}/{y}.png
-        attribution: '&copy; <a href="https://openstreetmap.org/copyright">OpenStreetMap contributors</a>'
-    api_rules:  # optional API design rules to which pygeoapi should adhere
-      url_prefix: ${PYGEOAPI_PREFIX:-}
+        url: https://maps.wikimedia.org/osm-intl/{z}/{x}/{y}.png
+        attribution: '<a href="https://wikimediafoundation.org/wiki/Maps_Terms_of_Use">Wikimedia maps</a> | Map data &copy; <a href="https://openstreetmap.org/copyright">OpenStreetMap contributors</a>'
 
 logging:
     level: DEBUG

@@ -62,25 +62,24 @@ class TabledapProvider(BaseProvider):
 
         LOGGER.debug('Setting provider query filters')
         self.filters = self.options.get('filters')
-        self.get_fields()
+        self.fields = self.get_fields()
 
     def get_fields(self):
-        if not self._fields:
-            LOGGER.debug('Fetching one feature for field definitions')
-            properties = self.query(limit=1)['features'][0]['properties']
+        LOGGER.debug('Fetching one feature for field definitions')
+        properties = self.query(limit=1)['features'][0]['properties']
 
-            for key, value in properties.items():
-                LOGGER.debug(f'Field: {key}={value}')
+        for key, value in properties.items():
+            LOGGER.debug(f'Field: {key}={value}')
 
-                data_type = type(value).__name__
+            data_type = type(value).__name__
 
-                if data_type == 'str':
-                    data_type = 'string'
-                if data_type == 'float':
-                    data_type = 'number'
-            self._fields[key] = {'type': data_type}
+            if data_type == 'str':
+                data_type = 'string'
+            if data_type == 'float':
+                data_type = 'number'
+            properties[key] = {'type': data_type}
 
-        return self._fields
+        return properties
 
     @crs_transform
     def query(self, offset=0, limit=10, resulttype='results',

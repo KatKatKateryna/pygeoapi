@@ -6,7 +6,7 @@
 #
 # Copyright (c) 2018 Jorge Samuel Mendes de Jesus
 # Copyright (c) 2023 Tom Kralidis
-# Copyright (c) 2025 Francesco Bartoli
+# Copyright (c) 2020 Francesco Bartoli
 #
 # Permission is hereby granted, free of charge, to any person
 # obtaining a copy of this software and associated documentation
@@ -88,7 +88,7 @@ class SQLiteGPKGProvider(BaseProvider):
         :returns: dict of fields
         """
 
-        if not self._fields:
+        if not self.fields:
             results = self.cursor.execute(
                 f'PRAGMA table_info({self.table})').fetchall()
             for item in results:
@@ -100,9 +100,9 @@ class SQLiteGPKGProvider(BaseProvider):
                     json_type = 'string'
 
                 if json_type is not None:
-                    self._fields[item['name']] = {'type': json_type}
+                    self.fields[item['name']] = {'type': json_type}
 
-        return self._fields
+        return self.fields
 
     def __get_where_clauses(self, properties=[], bbox=[]):
         """

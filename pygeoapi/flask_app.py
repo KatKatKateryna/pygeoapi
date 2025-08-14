@@ -3,7 +3,7 @@
 # Authors: Tom Kralidis <tomkralidis@gmail.com>
 #          Norman Barker <norman.barker@gmail.com>
 #
-# Copyright (c) 2025 Tom Kralidis
+# Copyright (c) 2024 Tom Kralidis
 #
 # Permission is hereby granted, free of charge, to any person
 # obtaining a copy of this software and associated documentation
@@ -34,11 +34,15 @@ import os
 from typing import Union
 
 import click
+from datetime import datetime, timezone
 from flask import (Flask, Blueprint, make_response, request,
-                   send_from_directory, Response, Request)
+                   send_from_directory, Response, Request, stream_with_context)
+from http import HTTPStatus
+
+import json
+from urllib.request import urlopen
 
 from pygeoapi.api import API, APIRequest, apply_gzip
-import pygeoapi.api as core_api
 import pygeoapi.api.coverages as coverages_api
 import pygeoapi.api.environmental_data_retrieval as edr_api
 import pygeoapi.api.itemtypes as itemtypes_api
@@ -46,9 +50,10 @@ import pygeoapi.api.maps as maps_api
 import pygeoapi.api.processes as processes_api
 import pygeoapi.api.stac as stac_api
 import pygeoapi.api.tiles as tiles_api
+from pygeoapi.provider.speckle_utils.legal import COUNTRY_CODES
 from pygeoapi.openapi import load_openapi_document
 from pygeoapi.config import get_config
-from pygeoapi.util import get_mimetype, get_api_rules
+from pygeoapi.util import get_mimetype, get_api_rules, render_j2_template
 
 
 CONFIG = get_config()
@@ -57,7 +62,6 @@ OPENAPI = load_openapi_document()
 API_RULES = get_api_rules(CONFIG)
 
 if CONFIG['server'].get('admin'):
-    import pygeoapi.admin as admin_api
     from pygeoapi.admin import Admin
 
 STATIC_FOLDER = 'static'
@@ -73,18 +77,13 @@ BLUEPRINT = Blueprint(
     static_folder=STATIC_FOLDER,
     url_prefix=API_RULES.get_url_prefix('flask')
 )
-ADMIN_BLUEPRINT = Blueprint(
-    'admin',
-    __name__,
-    static_folder=STATIC_FOLDER,
-    url_prefix=API_RULES.get_url_prefix('flask')
-)
+ADMIN_BLUEPRINT = Blueprint('admin', __name__, static_folder=STATIC_FOLDER)
 
 # CORS: optionally enable from config.
 if CONFIG['server'].get('cors', False):
     try:
         from flask_cors import CORS
-        CORS(APP, CORS_EXPOSE_HEADERS=['*'])
+        CORS(APP)
     except ModuleNotFoundError:
         print('Python package flask-cors required for CORS support')
 
@@ -125,10 +124,27 @@ if (OGC_SCHEMAS_LOCATION is not None and
                                    mimetype=get_mimetype(basename_))
 
 
+# TODO: inline in execute_from_flask when all views have been refactored
+def get_response(result: tuple):
+    """
+    Creates a Flask Response object and updates matching headers.
+
+    :param result: The result of the API call.
+                   This should be a tuple of (headers, status, content).
+
+    :returns: A Response instance
+    """
+
+    headers, status, content = result
+    response = make_response(content, status)
+
+    if headers:
+        response.headers = headers
+    return response
+
+
 def execute_from_flask(api_function, request: Request, *args,
-                       skip_valid_check=False,
-                       alternative_api=None
-                       ) -> Response:
+                       skip_valid_check=False) -> Response:
     """
     Executes API function from Flask
 
@@ -136,28 +152,81 @@ def execute_from_flask(api_function, request: Request, *args,
     :param request: request object
     :param *args: variable length additional arguments
     :param skip_validity_check: bool
-    :param alternative_api: specify custom api instance such as Admin
 
     :returns: A Response instance
     """
 
-    actual_api = api_ if alternative_api is None else alternative_api
-
-    api_request = APIRequest.from_flask(request, actual_api.locales)
+    CONFIG = get_config(request=request)
+    api_ = API(CONFIG, OPENAPI)
+    
+    api_request = APIRequest.from_flask(request, api_.locales)
 
     content: Union[str, bytes]
 
     if not skip_valid_check and not api_request.is_valid():
-        headers, status, content = actual_api.get_format_exception(api_request)
+        headers, status, content = api_.get_format_exception(api_request)
     else:
-        headers, status, content = api_function(actual_api, api_request, *args)
+        headers, status, content = api_function(api_, api_request, *args)
         content = apply_gzip(headers, content)
+        # handle jsonld too?
 
-    response = make_response(content, status)
+    return get_response((headers, status, content))
 
-    if headers:
-        response.headers = headers
-    return response
+
+def handle_client(url_route: str):
+
+    # if called fromm the browser, Exceptions from this function will result in infinite load
+    agent = request.headers.get('User-Agent')
+    if request.environ.get('HTTP_X_FORWARDED_FOR') is None:
+        ip_address = request.environ['REMOTE_ADDR']
+    else:
+        ip_address = request.environ['HTTP_X_FORWARDED_FOR']
+
+    if agent is not None and "(https://www.checklyhq.com)" not in agent:
+        print(f"_______________________{datetime.now().astimezone(timezone.utc)} _URL access")
+        print(f"_Agent {url_route}: {agent}")
+        print(f"_IP Address: {ip_address}")
+        print(f"_Request URL: {request.url}")
+    
+    request.url += f"&userAgent={agent}"
+
+    # by Agent: 
+    if agent is not None and ("YaBrowser/" in agent or "yandex" in agent.lower()):
+        raise ValueError("Your browser is not supported.")
+    
+    # by IP:
+    try:
+        url = 'https://ipinfo.io/' + ip_address + '/json'
+        res = urlopen(url)
+        data = json.load(res)
+        if isinstance(data, dict) and isinstance(data["country"], str):
+            if data["country"].lower() in COUNTRY_CODES:
+                raise PermissionError("Review Speckle Terms and Conditions")
+        else:
+            print(f"Error validating client: DATA {data}")
+    except Exception as e:
+        print(f"Error validating client from start: {e}")
+    
+def generate():
+    collection_id = "speckle"
+
+    yield loading_screen().data
+
+    handle_client("/")
+    CONFIG = get_config(request=request)
+    api_ = API(CONFIG, OPENAPI)
+
+    try:
+        browser_response = execute_from_flask(itemtypes_api.get_collection_items,
+                            request, collection_id,
+                            skip_valid_check=True)
+        yield browser_response.data
+
+    except PermissionError as ex:
+        raise ex
+
+    except Exception as ex:
+        yield error_screen(ex).data
 
 
 @BLUEPRINT.route('/')
@@ -167,8 +236,45 @@ def landing_page():
 
     :returns: HTTP response
     """
-    return execute_from_flask(core_api.landing_page, request)
 
+    agent = request.headers.get('User-Agent')
+    browser_agent = False
+    browser_list = ["Chrome", "Safari", "Firefox", "Edg/", "Trident/"]
+    for br in browser_list:
+        if agent is not None and br in agent:
+            browser_agent = True
+            break
+    
+
+    # if requested from the browser, return this, otherwise ignore IF statement
+    if request.method == 'GET' and browser_agent:  # list items
+        return Response(stream_with_context(generate()))
+    
+    # for non-browsers
+    handle_client("/")
+    CONFIG = get_config(request=request)
+    api_ = API(CONFIG, OPENAPI)
+    return get_response(api_.landing_page(request))
+
+def error_screen(ex: Exception):
+    """
+    Loading empty page
+
+    :returns: HTTP response
+    """
+    content = render_j2_template(api_.tpl_config, 'error_screen.html',{"exception": ex})
+
+    return get_response((request.headers, HTTPStatus.OK, content))
+
+def loading_screen():
+    """
+    Loading empty page
+
+    :returns: HTTP response
+    """
+    content = render_j2_template(api_.tpl_config, 'loading_screen.html',{'url': CONFIG["server"]["url"]})
+
+    return get_response((request.headers, HTTPStatus.OK, content))
 
 @BLUEPRINT.route('/openapi')
 def openapi():
@@ -177,8 +283,9 @@ def openapi():
 
     :returns: HTTP response
     """
-
-    return execute_from_flask(core_api.openapi_, request)
+    
+    # raise NotImplementedError()
+    return get_response(api_.openapi_(request))
 
 
 @BLUEPRINT.route('/conformance')
@@ -188,8 +295,9 @@ def conformance():
 
     :returns: HTTP response
     """
-
-    return execute_from_flask(core_api.conformance, request)
+    
+    # raise NotImplementedError()
+    return get_response(api_.conformance(request))
 
 
 @BLUEPRINT.route('/TileMatrixSets/<tileMatrixSetId>')
@@ -202,6 +310,7 @@ def get_tilematrix_set(tileMatrixSetId=None):
     :returns: HTTP response
     """
 
+    raise NotImplementedError()
     return execute_from_flask(tiles_api.tilematrixset, request,
                               tileMatrixSetId)
 
@@ -214,6 +323,7 @@ def get_tilematrix_sets():
     :returns: HTTP response
     """
 
+    raise NotImplementedError()
     return execute_from_flask(tiles_api.tilematrixsets, request)
 
 
@@ -227,9 +337,19 @@ def collections(collection_id=None):
 
     :returns: HTTP response
     """
+    
+    handle_client("/collections")
+    return get_response(api_.describe_collections(request, collection_id))
 
-    return execute_from_flask(core_api.describe_collections, request,
-                              collection_id)
+
+@BLUEPRINT.route('/speckle')
+def speckle_collection():
+
+    handle_client("/speckle")
+
+    collection_id="speckle"
+
+    return collection_items(collection_id=collection_id)
 
 
 @BLUEPRINT.route('/collections/<path:collection_id>/schema')
@@ -242,8 +362,8 @@ def collection_schema(collection_id):
     :returns: HTTP response
     """
 
-    return execute_from_flask(core_api.get_collection_schema, request,
-                              collection_id)
+    # raise NotImplementedError()
+    return get_response(api_.get_collection_schema(request, collection_id))
 
 
 @BLUEPRINT.route('/collections/<path:collection_id>/queryables')
@@ -256,10 +376,12 @@ def collection_queryables(collection_id=None):
     :returns: HTTP response
     """
 
+    # raise NotImplementedError()
     return execute_from_flask(itemtypes_api.get_collection_queryables, request,
                               collection_id)
 
 
+# @BLUEPRINT.route('/')
 @BLUEPRINT.route('/collections/<path:collection_id>/items',
                  methods=['GET', 'POST', 'OPTIONS'],
                  provide_automatic_options=False)
@@ -275,9 +397,17 @@ def collection_items(collection_id, item_id=None):
 
     :returns: HTTP response
     """
+    
+    handle_client(f"/collections/{collection_id}/items")
+
+    collection_id = 'speckle'
 
     if item_id is None:
-        if request.method == 'POST':  # filter or manage items
+        if request.method == 'GET':  # list items
+            return execute_from_flask(itemtypes_api.get_collection_items,
+                                      request, collection_id,
+                                      skip_valid_check=True)
+        elif request.method == 'POST':  # filter or manage items
             if request.content_type is not None:
                 if request.content_type == 'application/geo+json':
                     return execute_from_flask(
@@ -286,16 +416,12 @@ def collection_items(collection_id, item_id=None):
                             skip_valid_check=True)
                 else:
                     return execute_from_flask(
-                            itemtypes_api.get_collection_items, request,
+                            itemtypes_api.post_collection_items, request,
                             collection_id, skip_valid_check=True)
         elif request.method == 'OPTIONS':
             return execute_from_flask(
                     itemtypes_api.manage_collection_item, request, 'options',
                     collection_id, skip_valid_check=True)
-        else:  # GET: list items
-            return execute_from_flask(itemtypes_api.get_collection_items,
-                                      request, collection_id,
-                                      skip_valid_check=True)
 
     elif request.method == 'DELETE':
         return execute_from_flask(itemtypes_api.manage_collection_item,
@@ -323,7 +449,7 @@ def collection_coverage(collection_id):
 
     :returns: HTTP response
     """
-
+    raise NotImplementedError()
     return execute_from_flask(coverages_api.get_collection_coverage, request,
                               collection_id, skip_valid_check=True)
 
@@ -338,6 +464,7 @@ def get_collection_tiles(collection_id=None):
     :returns: HTTP response
     """
 
+    raise NotImplementedError()
     return execute_from_flask(tiles_api.get_collection_tiles, request,
                               collection_id)
 
@@ -354,6 +481,7 @@ def get_collection_tiles_metadata(collection_id=None, tileMatrixSetId=None):
     :returns: HTTP response
     """
 
+    raise NotImplementedError()
     return execute_from_flask(tiles_api.get_collection_tiles_metadata,
                               request, collection_id, tileMatrixSetId,
                               skip_valid_check=True)
@@ -375,6 +503,7 @@ def get_collection_tiles_data(collection_id=None, tileMatrixSetId=None,
     :returns: HTTP response
     """
 
+    raise NotImplementedError()
     return execute_from_flask(
         tiles_api.get_collection_tiles_data,
         request, collection_id, tileMatrixSetId, tileMatrix, tileRow, tileCol,
@@ -394,6 +523,7 @@ def collection_map(collection_id, style_id=None):
     :returns: HTTP response
     """
 
+    raise NotImplementedError()
     return execute_from_flask(
         maps_api.get_collection_map, request, collection_id, style_id
     )
@@ -410,6 +540,7 @@ def get_processes(process_id=None):
     :returns: HTTP response
     """
 
+    raise NotImplementedError()
     return execute_from_flask(processes_api.describe_processes, request,
                               process_id)
 
@@ -426,6 +557,7 @@ def get_jobs(job_id=None):
     :returns: HTTP response
     """
 
+    raise NotImplementedError()
     if job_id is None:
         return execute_from_flask(processes_api.get_jobs, request)
     else:
@@ -446,6 +578,7 @@ def execute_process_jobs(process_id):
     :returns: HTTP response
     """
 
+    raise NotImplementedError()
     return execute_from_flask(processes_api.execute_process, request,
                               process_id)
 
@@ -461,7 +594,26 @@ def get_job_result(job_id=None):
     :returns: HTTP response
     """
 
+    raise NotImplementedError()
     return execute_from_flask(processes_api.get_job_result, request, job_id)
+
+
+@BLUEPRINT.route('/jobs/<job_id>/results/<resource>',
+                 methods=['GET'])
+def get_job_result_resource(job_id, resource):
+    """
+    OGC API - Processes job result resource endpoint
+
+    :param job_id: job identifier
+    :param resource: job resource
+
+    :returns: HTTP response
+    """
+
+    raise NotImplementedError()
+    # TODO: this does not seem to exist?
+    return get_response(api_.get_job_result_resource(
+        request, job_id, resource))
 
 
 @BLUEPRINT.route('/collections/<path:collection_id>/position')
@@ -470,8 +622,8 @@ def get_job_result(job_id=None):
 @BLUEPRINT.route('/collections/<path:collection_id>/radius')
 @BLUEPRINT.route('/collections/<path:collection_id>/trajectory')
 @BLUEPRINT.route('/collections/<path:collection_id>/corridor')
-@BLUEPRINT.route('/collections/<path:collection_id>/locations/<location_id>')
-@BLUEPRINT.route('/collections/<path:collection_id>/locations')
+@BLUEPRINT.route('/collections/<path:collection_id>/locations/<location_id>')  # noqa
+@BLUEPRINT.route('/collections/<path:collection_id>/locations')  # noqa
 @BLUEPRINT.route('/collections/<path:collection_id>/instances/<instance_id>/position')  # noqa
 @BLUEPRINT.route('/collections/<path:collection_id>/instances/<instance_id>/area')  # noqa
 @BLUEPRINT.route('/collections/<path:collection_id>/instances/<instance_id>/cube')  # noqa
@@ -480,8 +632,6 @@ def get_job_result(job_id=None):
 @BLUEPRINT.route('/collections/<path:collection_id>/instances/<instance_id>/corridor')  # noqa
 @BLUEPRINT.route('/collections/<path:collection_id>/instances/<instance_id>/locations/<location_id>')  # noqa
 @BLUEPRINT.route('/collections/<path:collection_id>/instances/<instance_id>/locations')  # noqa
-@BLUEPRINT.route('/collections/<path:collection_id>/instances/<instance_id>')
-@BLUEPRINT.route('/collections/<path:collection_id>/instances')
 def get_collection_edr_query(collection_id, instance_id=None,
                              location_id=None):
     """
@@ -494,14 +644,6 @@ def get_collection_edr_query(collection_id, instance_id=None,
     :returns: HTTP response
     """
 
-    if (request.path.endswith('instances') or
-            (instance_id is not None and
-             request.path.endswith(instance_id))):
-        return execute_from_flask(
-            edr_api.get_collection_edr_instances, request, collection_id,
-            instance_id
-        )
-
     if location_id:
         query_type = 'locations'
     else:
@@ -509,7 +651,8 @@ def get_collection_edr_query(collection_id, instance_id=None,
 
     return execute_from_flask(
         edr_api.get_collection_edr_query, request, collection_id, instance_id,
-        query_type, location_id, skip_valid_check=True
+        query_type, location_id,
+        skip_valid_check=True,
     )
 
 
@@ -521,6 +664,7 @@ def stac_catalog_root():
     :returns: HTTP response
     """
 
+    raise NotImplementedError()
     return execute_from_flask(stac_api.get_stac_root, request)
 
 
@@ -534,6 +678,7 @@ def stac_catalog_path(path):
     :returns: HTTP response
     """
 
+    raise NotImplementedError()
     return execute_from_flask(stac_api.get_stac_path, request, path)
 
 
@@ -545,17 +690,15 @@ def admin_config():
     :returns: HTTP response
     """
 
+    raise NotImplementedError()
     if request.method == 'GET':
-        return execute_from_flask(admin_api.get_config_, request,
-                                  alternative_api=admin_)
+        return get_response(admin_.get_config(request))
 
     elif request.method == 'PUT':
-        return execute_from_flask(admin_api.put_config, request,
-                                  alternative_api=admin_)
+        return get_response(admin_.put_config(request))
 
     elif request.method == 'PATCH':
-        return execute_from_flask(admin_api.patch_config, request,
-                                  alternative_api=admin_)
+        return get_response(admin_.patch_config(request))
 
 
 @ADMIN_BLUEPRINT.route('/admin/config/resources', methods=['GET', 'POST'])
@@ -566,13 +709,12 @@ def admin_config_resources():
     :returns: HTTP response
     """
 
+    raise NotImplementedError()
     if request.method == 'GET':
-        return execute_from_flask(admin_api.get_resources, request,
-                                  alternative_api=admin_)
+        return get_response(admin_.get_resources(request))
 
     elif request.method == 'POST':
-        return execute_from_flask(admin_api.post_resource, request,
-                                  alternative_api=admin_)
+        return get_response(admin_.post_resource(request))
 
 
 @ADMIN_BLUEPRINT.route(
@@ -585,25 +727,18 @@ def admin_config_resource(resource_id):
     :returns: HTTP response
     """
 
+    raise NotImplementedError()
     if request.method == 'GET':
-        return execute_from_flask(admin_api.get_resource, request,
-                                  resource_id,
-                                  alternative_api=admin_)
+        return get_response(admin_.get_resource(request, resource_id))
 
     elif request.method == 'DELETE':
-        return execute_from_flask(admin_api.delete_resource, request,
-                                  resource_id,
-                                  alternative_api=admin_)
+        return get_response(admin_.delete_resource(request, resource_id))
 
     elif request.method == 'PUT':
-        return execute_from_flask(admin_api.put_resource, request,
-                                  resource_id,
-                                  alternative_api=admin_)
+        return get_response(admin_.put_resource(request, resource_id))
 
     elif request.method == 'PATCH':
-        return execute_from_flask(admin_api.patch_resource, request,
-                                  resource_id,
-                                  alternative_api=admin_)
+        return get_response(admin_.patch_resource(request, resource_id))
 
 
 APP.register_blueprint(BLUEPRINT)

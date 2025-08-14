@@ -60,7 +60,7 @@
     </p>
   </section>
  {% endif %}
- {% if data['stac-collection'] %}
+ {% if data['stac'] %}
   <section id="collections">
     <h2>{% trans %}SpatioTemporal Assets{% endtrans %}</h2>
     <p>
@@ -68,7 +68,7 @@
     </p>
   </section>
  {% endif %}
- {% if data['process'] %}
+ {% if data['processes'] %}
   <section id="processes">
       <h2>{% trans %}Processes{% endtrans %}</h2>
       <p>
@@ -97,14 +97,12 @@
         <a href="{{ config['server']['url'] }}/conformance?f=html">{% trans %}View the conformance classes of this service{% endtrans %}</a>
       </p>
   </section>
-  {% if data['tile'] %}
   <section id="tilematrixsets">
       <h2>{% trans %}Tile Matrix Sets{% endtrans %}</h2>
       <p>
         <a href="{{ config['server']['url'] }}/TileMatrixSets?f=html">{% trans %}View the Tile Matrix Sets available on this service{% endtrans %}</a>
       </p>
   </section>
-  {% endif %}
   </div>
   <div class="col-md-4 col-sm-12">
     <div class="card mb-3">
@@ -123,12 +121,11 @@
       <div class="card-body">
         <b>{% trans %}Address{% endtrans %}</b><br/>
         <div class="section">
-          <span>{{ config['metadata']['contact']['name'] }}</span><br/>
-          {% for key in ['address', 'city', 'stateorprovince', 'postalcode', 'country'] %}
-             {% if key in config['metadata']['contact'] %}
-             <span>{{ config['metadata']['contact'][key] }}</span><br/>
-             {% endif %}
-          {% endfor %}
+          <span>{{ config['metadata']['contact']['address'] }}</span><br/>
+          <span>{{ config['metadata']['contact']['city'] }}</span>,
+          <span>{{ config['metadata']['contact']['stateorprovince'] }}</span><br/>
+          <span>{{ config['metadata']['contact']['postalcode'] }}</span><br/>
+          <span>{{ config['metadata']['contact']['country'] }}</span>
         </div>
         <div>
           <b>{% trans %}Email{% endtrans %}</b><br/>

@@ -2,7 +2,7 @@
 #
 # Authors: Tom Kralidis <tomkralidis@gmail.com>
 #
-# Copyright (c) 2025 Tom Kralidis
+# Copyright (c) 2024 Tom Kralidis
 #
 # Permission is hereby granted, free of charge, to any person
 # obtaining a copy of this software and associated documentation
@@ -29,7 +29,6 @@
 
 import logging
 
-import numpy as np
 from pyproj import CRS, Transformer
 import rasterio
 from rasterio.io import MemoryFile
@@ -60,41 +59,38 @@ class RasterioProvider(BaseProvider):
             self.axes = self._coverage_properties['axes']
             self.crs = self._coverage_properties['bbox_crs']
             self.num_bands = self._coverage_properties['num_bands']
-            self.get_fields()
+            self.fields = self.get_fields()
             self.native_format = provider_def['format']['name']
         except Exception as err:
             LOGGER.warning(err)
             raise ProviderConnectionError(err)
 
     def get_fields(self):
-        if not self._fields:
-            for i, dtype in zip(self._data.indexes, self._data.dtypes):
-                LOGGER.debug(f'Adding field for band {i}')
-                i2 = str(i)
+        fields = {}
 
-                parameter = _get_parameter_metadata(
-                    self._data.profile['driver'], self._data.tags(i))
+        for i, dtype in zip(self._data.indexes, self._data.dtypes):
+            LOGGER.debug(f'Adding field for band {i}')
+            i2 = str(i)
 
-                name = parameter['description']
-                units = parameter.get('unit_label')
+            parameter = _get_parameter_metadata(
+                self._data.profile['driver'], self._data.tags(i))
 
-                dtype2 = dtype
-                if dtype.startswith('float'):
-                    dtype2 = 'float'
-                elif dtype.startswith('int'):
-                    dtype2 = 'integer'
-                elif dtype.startswith('str'):
-                    dtype2 = 'string'
+            name = parameter['description']
+            units = parameter.get('unit_label')
 
-                self._fields[i2] = {
-                    'title': name,
-                    'type': dtype2,
-                    '_meta': self._data.tags(i)
-                }
-                if units is not None:
-                    self._fields[i2]['x-ogc-unit'] = units
+            dtype2 = dtype
+            if dtype.startswith('float'):
+                dtype2 = 'number'
 
-        return self._fields
+            fields[i2] = {
+                'title': name,
+                'type': dtype2,
+                '_meta': self._data.tags(i)
+            }
+            if units is not None:
+                fields[i2]['x-ogc-unit'] = units
+
+        return fields
 
     def query(self, properties=[], subsets={}, bbox=None, bbox_crs=4326,
               datetime_=None, format_='json', **kwargs):
@@ -245,15 +241,16 @@ class RasterioProvider(BaseProvider):
             out_meta['units'] = _data.units
 
             LOGGER.debug('Serializing data in memory')
-            if format_ == 'json':
-                LOGGER.debug('Creating output in CoverageJSON')
-                out_meta['bands'] = args['indexes']
-                return self.gen_covjson(out_meta, out_image)
+            with MemoryFile() as memfile:
+                with memfile.open(**out_meta) as dest:
+                    dest.write(out_image)
 
-            else:  # return data in native format
-                with MemoryFile() as memfile:
-                    with memfile.open(**out_meta) as dest:
-                        dest.write(out_image)
+                if format_ == 'json':
+                    LOGGER.debug('Creating output in CoverageJSON')
+                    out_meta['bands'] = args['indexes']
+                    return self.gen_covjson(out_meta, out_image)
+
+                else:  # return data in native format
                     LOGGER.debug('Returning data in native format')
                     return memfile.read()
 
@@ -309,9 +306,7 @@ class RasterioProvider(BaseProvider):
 
             parameter = {
                 'type': 'Parameter',
-                'description': {
-                    'en': pm['description']
-                },
+                'description': pm['description'],
                 'unit': {
                     'symbol': pm['unit_label']
                 },
@@ -335,10 +330,7 @@ class RasterioProvider(BaseProvider):
                     'shape': [metadata['height'], metadata['width']],
                 }
                 # TODO: deal with multi-band value output
-                cj['ranges'][key]['values'] = [None if isinstance(v, float)
-                                               and np.isnan(v)
-                                               else v for v in
-                                               data.flatten().tolist()]
+                cj['ranges'][key]['values'] = data.flatten().tolist()
         except IndexError as err:
             LOGGER.warning(err)
             raise ProviderQueryError('Invalid query parameter')

@@ -10,7 +10,7 @@
 #          Francesco Martinelli <francesco.martinelli@ingv.it>
 #
 # Copyright (c) 2024 Tom Kralidis
-# Copyright (c) 2025 Francesco Bartoli
+# Copyright (c) 2022 Francesco Bartoli
 # Copyright (c) 2022 John A Stevenson and Colin Blackburn
 # Copyright (c) 2023 Ricardo Garcia Silva
 # Copyright (c) 2024 Bernhard Mallinger
@@ -46,10 +46,8 @@ from http import HTTPStatus
 import json
 import logging
 from typing import Tuple
-import urllib.parse
 
 from pygeoapi import l10n
-from pygeoapi.api import evaluate_limit
 from pygeoapi.util import (
     json_serial, render_j2_template, JobStatus, RequestedProcessExecutionMode,
     to_json, DATETIME_FORMAT)
@@ -65,7 +63,7 @@ from . import (
 LOGGER = logging.getLogger(__name__)
 
 CONFORMANCE_CLASSES = [
-    'http://www.opengis.net/spec/ogcapi-processes-1/1.0/conf/ogc-process-description',  # noqa
+    'http://www.opengis.net/spec/ogcapi-processes-1/1.0/conf/ogc-process-description', # noqa
     'http://www.opengis.net/spec/ogcapi-processes-1/1.0/conf/core',
     'http://www.opengis.net/spec/ogcapi-processes-1/1.0/conf/json',
     'http://www.opengis.net/spec/ogcapi-processes-1/1.0/conf/oas30',
@@ -101,20 +99,24 @@ def describe_processes(api: API, request: APIRequest,
             relevant_processes = [process]
         else:
             LOGGER.debug('Processing limit parameter')
-            if api.config['server'].get('limit') is not None:
-                msg = ('server.limit is no longer supported! '
-                       'Please use limits at the server or collection '
-                       'level (RFC5)')
-                LOGGER.warning(msg)
             try:
-                limit = evaluate_limit(request.params.get('limit'),
-                                       api.config['server'].get('limits', {}),
-                                       {})
+                limit = int(request.params.get('limit'))
+
+                if limit <= 0:
+                    msg = 'limit value should be strictly positive'
+                    return api.get_exception(
+                        HTTPStatus.BAD_REQUEST, headers, request.format,
+                        'InvalidParameterValue', msg)
+
                 relevant_processes = list(api.manager.processes)[:limit]
-            except ValueError as err:
+            except TypeError:
+                LOGGER.debug('returning all processes')
+                relevant_processes = api.manager.processes.keys()
+            except ValueError:
+                msg = 'limit value should be an integer'
                 return api.get_exception(
                     HTTPStatus.BAD_REQUEST, headers, request.format,
-                    'InvalidParameterValue', str(err))
+                    'InvalidParameterValue', msg)
 
         for key in relevant_processes:
             p = api.manager.get_processor(key)
@@ -211,14 +213,13 @@ def describe_processes(api: API, request: APIRequest,
 
     if request.format == F_HTML:  # render
         if process is not None:
-            tpl_config = api.get_dataset_templates(process)
-            response = render_j2_template(api.tpl_config, tpl_config,
+            response = render_j2_template(api.tpl_config,
                                           'processes/process.html',
                                           response, request.locale)
         else:
-            response = render_j2_template(
-                api.tpl_config, api.config['server']['templates'],
-                'processes/index.html', response, request.locale)
+            response = render_j2_template(api.tpl_config,
+                                          'processes/index.html', response,
+                                          request.locale)
 
         return headers, HTTPStatus.OK, response
 
@@ -239,43 +240,10 @@ def get_jobs(api: API, request: APIRequest,
 
     headers = request.get_response_headers(SYSTEM_LOCALE,
                                            **api.api_headers)
-    LOGGER.debug('Processing limit parameter')
-    try:
-        limit = evaluate_limit(request.params.get('limit'),
-                               api.config['server'].get('limits', {}),
-                               {})
-    except ValueError as err:
-        return api.get_exception(
-            HTTPStatus.BAD_REQUEST, headers, request.format,
-            'InvalidParameterValue', str(err))
-
-    LOGGER.debug('Processing offset parameter')
-    try:
-        offset = int(request.params.get('offset'))
-        if offset < 0:
-            msg = 'offset value should be positive or zero'
-            return api.get_exception(
-                HTTPStatus.BAD_REQUEST, headers, request.format,
-                'InvalidParameterValue', msg)
-    except TypeError as err:
-        LOGGER.warning(err)
-        offset = 0
-    except ValueError:
-        msg = 'offset value should be an integer'
-        return api.get_exception(
-            HTTPStatus.BAD_REQUEST, headers, request.format,
-            'InvalidParameterValue', msg)
-
     if job_id is None:
-        jobs_data = api.manager.get_jobs(limit=limit, offset=offset)
-        # TODO: For pagination to work, the provider has to do the sorting.
-        #       Here we do sort again in case the provider doesn't support
-        #       pagination yet and always returns all jobs.
-        jobs = sorted(jobs_data['jobs'],
-                      key=lambda k: k['started'],
+        jobs = sorted(api.manager.get_jobs(),
+                      key=lambda k: k['job_start_datetime'],
                       reverse=True)
-        numberMatched = jobs_data['numberMatched']
-
     else:
         try:
             jobs = [api.manager.get_job(job_id)]
@@ -283,7 +251,6 @@ def get_jobs(api: API, request: APIRequest,
             return api.get_exception(
                 HTTPStatus.NOT_FOUND, headers, request.format,
                 'InvalidParameterValue', job_id)
-        numberMatched = 1
 
     serialized_jobs = {
         'jobs': [],
@@ -308,10 +275,8 @@ def get_jobs(api: API, request: APIRequest,
             'message': job_['message'],
             'progress': job_['progress'],
             'parameters': job_.get('parameters'),
-            'created': job_['created'],
-            'started': job_['started'],
-            'finished': job_['finished'],
-            'updated': job_['updated']
+            'job_start_datetime': job_['job_start_datetime'],
+            'job_end_datetime': job_['job_end_datetime']
         }
 
         # TODO: translate
@@ -344,44 +309,6 @@ def get_jobs(api: API, request: APIRequest,
 
         serialized_jobs['jobs'].append(job2)
 
-    serialized_query_params = ''
-    for k, v in request.params.items():
-        if k not in ('f', 'offset'):
-            serialized_query_params += '&'
-            serialized_query_params += urllib.parse.quote(k, safe='')
-            serialized_query_params += '='
-            serialized_query_params += urllib.parse.quote(str(v), safe=',')
-
-    uri = f'{api.base_url}/jobs'
-
-    if offset > 0:
-        prev = max(0, offset - limit)
-        serialized_jobs['links'].append(
-            {
-                'href': f'{uri}?offset={prev}{serialized_query_params}',
-                'type': FORMAT_TYPES[F_JSON],
-                'rel': 'prev',
-                'title': l10n.translate('Items (prev)', request.locale),
-            })
-
-    next_link = False
-
-    if numberMatched > (limit + offset):
-        next_link = True
-    elif len(jobs) == limit:
-        next_link = True
-
-    if next_link:
-        next_ = offset + limit
-        next_href = f'{uri}?offset={next_}{serialized_query_params}'
-        serialized_jobs['links'].append(
-            {
-                'href': next_href,
-                'rel': 'next',
-                'type': FORMAT_TYPES[F_JSON],
-                'title': l10n.translate('Items (next)', request.locale),
-            })
-
     if job_id is None:
         j2_template = 'jobs/index.html'
     else:
@@ -391,13 +318,10 @@ def get_jobs(api: API, request: APIRequest,
     if request.format == F_HTML:
         data = {
             'jobs': serialized_jobs,
-            'offset': offset,
             'now': datetime.now(timezone.utc).strftime(DATETIME_FORMAT)
         }
-        response = render_j2_template(
-            api.tpl_config, api.config['server']['templates'], j2_template,
-            data, request.locale)
-
+        response = render_j2_template(api.tpl_config, j2_template, data,
+                                      request.locale)
         return headers, HTTPStatus.OK, response
 
     return headers, HTTPStatus.OK, to_json(serialized_jobs,
@@ -455,8 +379,6 @@ def execute_process(api: API, request: APIRequest,
     requested_outputs = data.get('outputs')
     LOGGER.debug(f'outputs: {requested_outputs}')
 
-    requested_response = data.get('response', 'raw')
-
     subscriber = None
     subscriber_dict = data.get('subscriber')
     if subscriber_dict:
@@ -485,14 +407,10 @@ def execute_process(api: API, request: APIRequest,
         result = api.manager.execute_process(
             process_id, data_dict, execution_mode=execution_mode,
             requested_outputs=requested_outputs,
-            subscriber=subscriber,
-            requested_response=requested_response)
+            subscriber=subscriber)
         job_id, mime_type, outputs, status, additional_headers = result
         headers.update(additional_headers or {})
-
-        if api.manager.is_async:
-            headers['Location'] = f'{api.base_url}/jobs/{job_id}'
-
+        headers['Location'] = f'{api.base_url}/jobs/{job_id}'
     except ProcessorExecuteError as err:
         return api.get_exception(
             err.http_status_code, headers,
@@ -502,11 +420,11 @@ def execute_process(api: API, request: APIRequest,
     if status == JobStatus.failed:
         response = outputs
 
-    if requested_response == 'raw':
+    if data.get('response', 'raw') == 'raw':
         headers['Content-Type'] = mime_type
         response = outputs
     elif status not in (JobStatus.failed, JobStatus.accepted):
-        response = outputs
+        response['outputs'] = [outputs]
 
     if status == JobStatus.accepted:
         http_status = HTTPStatus.CREATED
@@ -515,7 +433,7 @@ def execute_process(api: API, request: APIRequest,
     else:
         http_status = HTTPStatus.OK
 
-    if mime_type == 'application/json' or requested_response == 'document':
+    if mime_type == 'application/json':
         response2 = to_json(response, api.pretty_print)
     else:
         response2 = response
@@ -588,8 +506,8 @@ def get_job_result(api: API, request: APIRequest,
                 'result': job_output
             }
             content = render_j2_template(
-                api.config, api.config['server']['templates'],
-                'jobs/results/index.html', data, request.locale)
+                api.config, 'jobs/results/index.html',
+                data, request.locale)
 
     return headers, HTTPStatus.OK, content
 
@@ -725,16 +643,6 @@ def get_oas_30(cfg: dict, locale: str) -> tuple[list[dict[str, str]], dict[str, 
                 'description': md_desc,
                 'tags': [name],
                 'operationId': f'execute{name.capitalize()}Job',
-                'parameters': [{
-                    'in': 'header',
-                    'name': 'Prefer',
-                    'required': False,
-                    'description': 'Indicates client preferences, including whether the client is capable of asynchronous processing.',  # noqa
-                    'schema': {
-                        'type': 'string',
-                        'enum': ['respond-async']
-                    }
-                }],
                 'responses': {
                     '200': {'$ref': '#/components/responses/200'},
                     '201': {'$ref': f"{OPENAPI_YAML['oapip']}/responses/ExecuteAsync.yaml"},  # noqa
@@ -755,25 +663,6 @@ def get_oas_30(cfg: dict, locale: str) -> tuple[list[dict[str, str]], dict[str, 
                 }
             }
         }
-
-        try:
-            first_key = list(p.metadata['outputs'])[0]
-            p_output = p.metadata['outputs'][first_key]
-
-            if p_output.get('schema') is not None:
-                LOGGER.debug('Adding output schema')
-                content_media_type = p_output['schema'].pop('contentMediaType', 'application/json')  # noqa
-                paths[f'{process_name_path}/execution']['post']['responses']['200'] = {  # noqa
-                    'description': 'Process output schema',
-                    'content': {
-                        content_media_type: {
-                            'schema': p_output['schema']
-                        }
-                    }
-                }
-        except (IndexError, KeyError):
-            LOGGER.debug('No output defined')
-
         if 'example' in p.metadata:
             paths[f'{process_name_path}/execution']['post']['requestBody']['content']['application/json']['example'] = p.metadata['example']  # noqa
 

@@ -2,7 +2,7 @@
 #
 # Authors: Tom Kralidis <tomkralidis@gmail.com>
 #
-# Copyright (c) 2025 Tom Kralidis
+# Copyright (c) 2022 Tom Kralidis
 #
 # Permission is hereby granted, free of charge, to any person
 # obtaining a copy of this software and associated documentation
@@ -69,13 +69,11 @@ class BaseProvider:
         self.uri_field = provider_def.get('uri_field')
         self.x_field = provider_def.get('x_field')
         self.y_field = provider_def.get('y_field')
-        self.z_field = provider_def.get('z_field')
         self.time_field = provider_def.get('time_field')
         self.title_field = provider_def.get('title_field')
         self.properties = provider_def.get('properties', [])
         self.file_types = provider_def.get('file_types', [])
-        self.include_extra_query_parameters = provider_def.get('include_extra_query_parameters', False)  # noqa
-        self._fields = {}
+        self.fields = {}
         self.filename = None
 
         # for coverage providers
@@ -87,30 +85,12 @@ class BaseProvider:
         """
         Get provider field information (names, types)
 
-        Example response:
-            {'field1': {'type': 'string'}, 'field2': {'type': 'number'}}
+        Example response: {'field1': 'string', 'field2': 'number'}}
 
         :returns: dict of field names and their associated JSON Schema types
         """
 
         raise NotImplementedError()
-
-    @property
-    def fields(self) -> dict:
-        """
-        Store provider field information (names, types)
-
-        Example response:
-            {'field1': {'type': 'string'}, 'field2': {'type': 'number'}}
-
-        :returns: dict of dicts (field names and their
-                  associated JSON Schema definitions)
-        """
-
-        if hasattr(self, '_fields'):
-            return self._fields
-        else:
-            return self.get_fields()
 
     def get_schema(self, schema_type: SchemaType = SchemaType.item):
         """
@@ -143,20 +123,6 @@ class BaseProvider:
 
         :returns: `dict` of metadata construct (format
                   determined by provider/standard)
-        """
-
-        raise NotImplementedError()
-
-    def get_domains(self, properties=[], current=False):
-        """
-        Get domains from dataset
-
-        :param properties: `list` of property names
-        :param current: `bool` of whether to provide list of live
-                        values (default `False`)
-
-        :returns: `tuple` of domains and whether they are based on the
-                  current/live dataset
         """
 
         raise NotImplementedError()

@@ -35,7 +35,6 @@ from pygeoapi.provider.base_mvt import BaseMVTProvider
 from pygeoapi.provider.base import (ProviderConnectionError,
                                     ProviderGenericError,
                                     ProviderInvalidQueryError)
-from pygeoapi.provider.tile import ProviderTileNotFoundError
 from pygeoapi.models.provider.base import (
     TileSetMetadata, LinkType)
 from pygeoapi.util import is_url, url_join
@@ -170,14 +169,9 @@ class MVTProxyProvider(BaseMVTProvider):
                 with requests.Session() as session:
                     session.get(base_url)
                     if '.' in url.path:
-                        resp = session.get(f'{base_url}/{layer}/{z}/{x}/{y}.{format_}{url_query}')  # noqa
+                        resp = session.get(f'{base_url}/{layer}/{z}/{y}/{x}.{format_}{url_query}')  # noqa
                     else:
-                        resp = session.get(f'{base_url}/{layer}/{z}/{x}/{y}{url_query}')  # noqa
-
-                    if resp.status_code == 404:
-                        if (self.is_in_limits(self.get_tilematrixset(tileset), z, x, y)): # noqa
-                            return None
-                        raise ProviderTileNotFoundError
+                        resp = session.get(f'{base_url}/{layer}/{z}/{y}/{x}{url_query}')  # noqa
 
                     resp.raise_for_status()
                     return resp.content
@@ -259,4 +253,4 @@ class MVTProxyProvider(BaseMVTProvider):
 
         content.links = links
 
-        return content.model_dump(exclude_none=True)
+        return content.dict(exclude_none=True)

@@ -1,3 +1,6 @@
+access_log
+error_log*
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -104,7 +107,6 @@ ENV/
 *.openapi.yml
 
 # development setup examples
-example-config.yml
 example-openapi.yml 
 
 # misc

@@ -7,7 +7,6 @@
 #
 # Copyright (c) 2024 Tom Kralidis
 # Copyright (c) 2022 John A Stevenson and Colin Blackburn
-# Copyright (c) 2025 Joana Simoes
 #
 # Permission is hereby granted, free of charge, to any person
 # obtaining a copy of this software and associated documentation
@@ -35,13 +34,10 @@
 
 import json
 from http import HTTPStatus
-import pytest
 
 from pygeoapi.api import FORMAT_TYPES, F_HTML
 from pygeoapi.api.tiles import (
-    get_collection_tiles, tilematrixset,
-    tilematrixsets, get_collection_tiles_metadata,
-    get_collection_tiles_data
+    get_collection_tiles, tilematrixset, tilematrixsets,
 )
 from pygeoapi.models.provider.base import TileMatrixSetEnum
 
@@ -67,24 +63,6 @@ def test_get_collection_tiles(config, api_):
     assert len(content['tilesets']) > 0
 
 
-def test_get_collection_tiles_data(config, api_):
-    req = mock_api_request({'f': 'mvt'})
-    rsp_headers, code, response = get_collection_tiles_data(
-        api_, req, 'naturalearth/lakes',
-        matrix_id='WebMercatorQuad', z_idx=0, x_idx=0, y_idx=0)
-    assert code == HTTPStatus.OK
-
-    rsp_headers, code, response = get_collection_tiles_data(
-        api_, req, 'naturalearth/lakes',
-        matrix_id='WebMercatorQuad', z_idx=5, x_idx=15, y_idx=16)
-    assert code == HTTPStatus.NO_CONTENT
-
-    rsp_headers, code, response = get_collection_tiles_data(
-        api_, req, 'naturalearth/lakes',
-        matrix_id='WebMercatorQuad', z_idx=0, x_idx=1, y_idx=1)
-    assert code == HTTPStatus.NOT_FOUND
-
-
 def test_tilematrixsets(config, api_):
     req = mock_api_request()
     rsp_headers, code, response = tilematrixsets(api_, req)
@@ -103,23 +81,6 @@ def test_tilematrixsets(config, api_):
     assert rsp_headers['Content-Type'] == FORMAT_TYPES[F_HTML]
     # No language requested: should be set to default from YAML
     assert rsp_headers['Content-Language'] == 'en-US'
-
-
-@pytest.mark.parametrize('file_format', ['html', 'json', 'tilejson'])
-def test_get_collection_tiles_metadata_bad_request(api_, file_format):
-    req = mock_api_request({'f': file_format})
-    _, code, _ = get_collection_tiles_metadata(
-        api_, req, 'obs', 'WorldCRS84Quad')
-    assert code == HTTPStatus.BAD_REQUEST
-
-
-@pytest.mark.parametrize('file_format', ['json', 'tilejson'])
-def test_get_collection_tiles_metadata_formats(api_, file_format):
-    req = mock_api_request({'f': file_format})
-    _, code, response = get_collection_tiles_metadata(
-        api_, req, 'naturalearth/lakes', matrix_id='WebMercatorQuad')
-    assert code == HTTPStatus.OK
-    assert json.loads(response)
 
 
 def test_tilematrixset(config, api_):

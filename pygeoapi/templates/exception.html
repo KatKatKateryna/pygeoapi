@@ -3,6 +3,12 @@
 {% block body %}
     <section id="exception">
       <h2>{% trans %}Exception{% endtrans %}</h2>
-      <p>{{ data['description'] | striptags }}</p>
+      <p>{{ data['description'] }}</p>
     </section>
+    <script>
+      try {
+        document.getElementById("loading_screen").remove();
+      }
+      catch(err) {}
+    </script>
 {% endblock %}

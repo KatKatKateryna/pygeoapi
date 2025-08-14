@@ -32,6 +32,7 @@
 # =================================================================
 
 import collections
+from datetime import datetime
 import json
 import logging
 from multiprocessing import dummy
@@ -49,11 +50,10 @@ from pygeoapi.process.base import (
     UnknownProcessError,
 )
 from pygeoapi.util import (
-    get_current_datetime,
+    DATETIME_FORMAT,
     JobStatus,
     ProcessExecutionMode,
     RequestedProcessExecutionMode,
-    RequestedResponse,
     Subscriber
 )
 
@@ -107,21 +107,14 @@ class BaseManager:
         else:
             return load_plugin('process', process_conf['processor'])
 
-    def get_jobs(self,
-                 status: JobStatus = None,
-                 limit: Optional[int] = None,
-                 offset: Optional[int] = None
-                 ) -> dict:
+    def get_jobs(self, status: JobStatus = None) -> list:
         """
         Get process jobs, optionally filtered by status
 
         :param status: job status (accepted, running, successful,
                        failed, results) (default is all)
-        :param limit: number of jobs to return
-        :param offset: pagination offset
 
-        :returns: dict of list of jobs (identifier, status, process identifier)
-                  and numberMatched
+        :returns: `list` of jobs (identifier, status, process identifier)
         """
 
         raise NotImplementedError()
@@ -194,7 +187,6 @@ class BaseManager:
                                data_dict: dict,
                                requested_outputs: Optional[dict] = None,
                                subscriber: Optional[Subscriber] = None,
-                               requested_response: Optional[RequestedResponse] = RequestedResponse.raw.value  # noqa
                                ) -> Tuple[str, None, JobStatus]:
         """
         This private execution handler executes a process in a background
@@ -205,34 +197,27 @@ class BaseManager:
         :param p: `pygeoapi.process` object
         :param job_id: job identifier
         :param data_dict: `dict` of data parameters
-        :param requested_outputs: `dict` optionally specifying the subset of
-                                  required outputs - defaults to all outputs.
-                                  The value of any key may be an object and
-                                  include the property `transmissionMode`
-                                  (defaults to `value`)
-                                  Note: 'optional' is for backward
-                                  compatibility.
+        :param requested_outputs: `dict` specify the subset of required
+            outputs - defaults to all outputs.
+            The value of any key may be an object and include the property
+            `transmissionMode` - defaults to `value`.
+            Note: 'optional' is for backward compatibility.
         :param subscriber: optional `Subscriber` specifying callback URLs
-        :param requested_response: `RequestedResponse` optionally specifying
-                                   raw or document (default is `raw`)
 
         :returns: tuple of None (i.e. initial response payload)
                   and JobStatus.accepted (i.e. initial job status)
         """
-
-        args = (p, job_id, data_dict, requested_outputs, subscriber,
-                requested_response)
-
-        _process = dummy.Process(target=self._execute_handler_sync, args=args)
+        _process = dummy.Process(
+            target=self._execute_handler_sync,
+            args=(p, job_id, data_dict, requested_outputs, subscriber)
+        )
         _process.start()
-
         return 'application/json', None, JobStatus.accepted
 
     def _execute_handler_sync(self, p: BaseProcessor, job_id: str,
                               data_dict: dict,
                               requested_outputs: Optional[dict] = None,
                               subscriber: Optional[Subscriber] = None,
-                              requested_response: Optional[RequestedResponse] = RequestedResponse.raw.value  # noqa
                               ) -> Tuple[str, Any, JobStatus]:
         """
         Synchronous execution handler
@@ -244,27 +229,15 @@ class BaseManager:
         :param p: `pygeoapi.process` object
         :param job_id: job identifier
         :param data_dict: `dict` of data parameters
-        :param requested_outputs: `dict` optionally specifying the subset of
-                                  required outputs - defaults to all outputs.
-                                  The value of any key may be an object and
-                                  include the property `transmissionMode`
-                                  (defaults to `value`)
-                                  Note: 'optional' is for backward
-                                  compatibility.
+        :param requested_outputs: `dict` specify the subset of required
+            outputs - defaults to all outputs.
+            The value of any key may be an object and include the property
+            `transmissionMode` - defaults to `value`.
+            Note: 'optional' is for backward compatibility.
         :param subscriber: optional `Subscriber` specifying callback URLs
-        :param requested_response: `RequestedResponse` optionally specifying
-                                   raw or document (default is `raw`)
 
         :returns: tuple of MIME type, response payload and status
         """
-
-        extra_execute_parameters = {}
-
-        # only pass requested_outputs if supported,
-        # otherwise this breaks existing processes
-        if p.supports_outputs:
-            extra_execute_parameters['outputs'] = requested_outputs
-
         self._send_in_progress_notification(subscriber)
 
         try:
@@ -275,15 +248,15 @@ class BaseManager:
                 job_filename = None
 
             current_status = JobStatus.running
-            jfmt, outputs = p.execute(data_dict, **extra_execute_parameters)
-
-            if requested_response == RequestedResponse.document.value:
-                outputs = {
-                    'outputs': [outputs]
-                }
+            jfmt, outputs = p.execute(
+                data_dict,
+                # only pass requested_outputs if supported,
+                # otherwise this breaks existing processes
+                **({'outputs': requested_outputs}
+                   if p.supports_outputs else {})
+            )
 
             self.update_job(job_id, {
-                'updated': get_current_datetime(),
                 'status': current_status.value,
                 'message': 'Writing job output',
                 'progress': 95
@@ -305,8 +278,8 @@ class BaseManager:
             current_status = JobStatus.successful
 
             job_update_metadata = {
-                'finished': get_current_datetime(),
-                'updated': get_current_datetime(),
+                'job_end_datetime': datetime.utcnow().strftime(
+                    DATETIME_FORMAT),
                 'status': current_status.value,
                 'location': str(job_filename),
                 'mimetype': jfmt,
@@ -336,8 +309,8 @@ class BaseManager:
             }
             LOGGER.exception(err)
             job_metadata = {
-                'finished': get_current_datetime(),
-                'updated': get_current_datetime(),
+                'job_end_datetime': datetime.utcnow().strftime(
+                    DATETIME_FORMAT),
                 'status': current_status.value,
                 'location': None,
                 'mimetype': 'application/octet-stream',
@@ -357,8 +330,7 @@ class BaseManager:
             data_dict: dict,
             execution_mode: Optional[RequestedProcessExecutionMode] = None,
             requested_outputs: Optional[dict] = None,
-            subscriber: Optional[Subscriber] = None,
-            requested_response: Optional[RequestedResponse] = RequestedResponse.raw.value  # noqa
+            subscriber: Optional[Subscriber] = None
     ) -> Tuple[str, Any, JobStatus, Optional[Dict[str, str]]]:
         """
         Default process execution handler
@@ -367,17 +339,12 @@ class BaseManager:
         :param data_dict: `dict` of data parameters
         :param execution_mode: `str` optionally specifying sync or async
                                processing.
-        :param requested_outputs: `dict` optionally specifying the subset of
-                                  required outputs - defaults to all outputs.
-                                  The value of any key may be an object and
-                                  include the property `transmissionMode`
-                                  (default is `value`)
-                                  Note: 'optional' is for backward
-                                  compatibility.
+        :param requested_outputs: `dict` optionally specify the subset of
+            required outputs - defaults to all outputs.
+            The value of any key may be an object and include the property
+            `transmissionMode` - defaults to `value`.
+            Note: 'optional' is for backward compatibility.
         :param subscriber: `Subscriber` optionally specifying callback urls
-        :param requested_response: `RequestedResponse` optionally specifying
-                                   raw or document (default is `raw`)
-
 
         :raises UnknownProcessError: if the input process_id does not
                                      correspond to a known process
@@ -389,9 +356,6 @@ class BaseManager:
         job_id = str(uuid.uuid1())
         processor = self.get_processor(process_id)
         processor.set_job_id(job_id)
-        extra_execute_handler_parameters = {
-            'requested_response': requested_response
-        }
 
         if execution_mode == RequestedProcessExecutionMode.respond_async:
             job_control_options = processor.metadata.get(
@@ -432,10 +396,8 @@ class BaseManager:
             'type': 'process',
             'identifier': job_id,
             'process_id': process_id,
-            'created': get_current_datetime(),
-            'started': get_current_datetime(),
-            'updated': get_current_datetime(),
-            'finished': None,
+            'job_start_datetime': datetime.utcnow().strftime(DATETIME_FORMAT),
+            'job_end_datetime': None,
             'status': current_status.value,
             'location': None,
             'mimetype': 'application/octet-stream',
@@ -444,11 +406,6 @@ class BaseManager:
         }
         self.add_job(job_metadata)
 
-        # only pass subscriber if supported, otherwise this breaks
-        # existing managers
-        if self.supports_subscribing:
-            extra_execute_handler_parameters['subscriber'] = subscriber
-
         # TODO: handler's response could also be allowed to include more HTTP
         # headers
         mime_type, outputs, status = handler(
@@ -456,7 +413,10 @@ class BaseManager:
             job_id,
             data_dict,
             requested_outputs,
-            **extra_execute_handler_parameters)
+            # only pass subscriber if supported, otherwise this breaks existing
+            # managers
+            **({'subscriber': subscriber} if self.supports_subscribing else {})
+        )
 
         return job_id, mime_type, outputs, status, response_headers
 
